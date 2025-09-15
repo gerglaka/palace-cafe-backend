@@ -1,0 +1,29 @@
+﻿Category;Name;Price;Description;includesSides;isDeliverable;badge;imageUrl
+Smashburgers;Classic Cheese Burger;8,9;Angus Marhahús, 2x cheddar, olvasztott cheddar, majo, ketchup, mustár, savanyú uborka;1;1;;assets\images\menu\classic-cheese.JPG
+Smashburgers;Palace Burger ;11,9;Angus Marhahús, 2x cheddar, olvasztott cheddar, házi hagymalekvár, házi bacon  szósz, házi sweet chili, savanyú uborka, 2x bacon;1;1;Bestseller;assets\images\menu\palace-burger.JPG
+Hamburgers;Bacon Burger;12,9;150g Angus Marhahús, 4x bacon, cheddar, majo, bacon szósz, uborka, saláta lollo, hagyma, paradicsom, olvasztott cheddar;1;1;;assets\images\menu\bacon-burger.JPG
+Hamburgers;Simple Burger;10,9;150g Angus Marhahús, cheddar, majo, hot smokey szósz, uborka, saláta lollo, hagyma, paradicsom;1;1;;assets\images\menu\simple-burger.JPG
+Qurritos;Simple Qurrito;7,7;Tortilla, bbq honeq, cheddar, csirkemell;1;1;;assets\images\menu\simple-qurrito.JPG
+Qurritos;Hot Qurrito;7,9;Tortilla, samuraj, cheddar, csirkemell, paradicsom, rukkola;1;1;Spicy;assets\images\menu\hot-qurrito.JPG
+Mediterranean;Gyros;7,7;Pita, 150g gyros csirke, majo, tzatziki, paradicsom, uborka, hagyma;1;1;;assets\images\menu\gyros.JPG
+Mediterranean;Taco Beef;7,7;2x Tortilla, sriracha, cheddar, sörben pácolt házi tépetthús + házi chimichurri;0;1;;assets\images\menu\taco-beef.JPG
+Sides;Hasábburgonya;2,5;;0;1;;assets\images\menu\fries.JPG
+Sides ;Édesburgonya;3,5;;0;1;;assets\images\menu\sweet-potato.JPG
+Desserts;Churros;5,9;Churros, nutella, gyümölcsök, fahéj;0;0;;
+Desserts;American Pancake;5,9;Amerikai palacsinta, csoki + karamel szósz, juharszirup, nutella, mandula, gyümölcsök, tejszínhab;0;0;;
+Sauces ;Kecsup;1;;0;1;;assets\images\menu\ketchup.JPG
+Sauces ;BBQ Honey;1;;0;1;;assets\images\menu\bbq-honey.JPG
+NonAlcoholic;Coca Cola;2;;0;1;;assets\images\menu\coca-cola.JPG
+NonAlcoholic;Fanta;2;;0;1;;assets\images\menu\fanta.JPG
+Coffees;Espresso;2,2;;0;0;;
+Coffees;Cappuccino;2,7;;0;0;;
+Specialty;Matcha Latte;3,6;;0;0;;
+Specialty;Matcha Tonic;3,6;;0;0;;
+Lemonades;Epres Limonádé;3,7;;0;0;;
+Lemonades;Mangós Limonádé;3,7;;0;0;;
+Alcohol;Pilsner Urquell 0,5L;2,7;;0;0;;
+Alcohol;Irsai Olivér 0,1L;1,5;Fehér száraz;0;0;;
+Shots;Finlandia 0,04L;2,5;;0;0;;
+Shots;Beefeater 0,04L;2,7;;0;0;;
+Cocktails;Gintonic;5,4;4cl Gin, Tonic Classic/Mojito/Rose;0;0;;
+Cocktails;Moscow Mule;5,4;6cl Vodka, limelé, áfony dzsúsz, gyömbér tonic;0;0;;

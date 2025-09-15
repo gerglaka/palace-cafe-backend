@@ -1,0 +1,366 @@
+// Palace Cafe & Bar - Professional Database Schema
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Restaurant Information
+model Restaurant {
+  id                Int      @id @default(autoincrement())
+  name              String
+  description       String?
+  phone             String?
+  email             String?
+  address           String?
+  city              String?
+  postalCode        String?
+  country           String   @default("Slovakia")
+  isActive          Boolean  @default(true)
+  deliveryFee       Float    @default(2.50)
+  minimumOrder      Float    @default(0.00)
+  deliveryTime      String   @default("30-45 min")
+  openingHours      Json?    // Flexible opening hours storage
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("restaurants")
+}
+
+// Categories for menu organization
+model Category {
+  id               Int                 @id @default(autoincrement())
+  slug             String              @unique
+  displayOrder     Int                 @default(0)
+  isActive         Boolean             @default(true)
+  isDeliverable    Boolean             @default(true)
+  imageUrl         String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  
+  // Relations
+  menuItems        MenuItem[]
+  translations     CategoryTranslation[]
+
+  @@map("categories")
+}
+
+// Multi-language support for categories
+model CategoryTranslation {
+  id          Int      @id @default(autoincrement())
+  categoryId  Int
+  language    String   // 'hu', 'en', 'sk'
+  name        String
+  description String?
+  
+  // Relations
+  category    Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  
+  @@unique([categoryId, language])
+  @@map("category_translations")
+}
+
+// Menu items (food products)
+model MenuItem {
+  id               Int                    @id @default(autoincrement())
+  slug             String                 @unique
+  price            Float
+  originalPrice    Float?                 // For discounts
+  imageUrl         String?
+  badge            String?                // "Bestseller", "Spicy", "New"
+  includesSides    Boolean                @default(false)
+  isAvailable      Boolean                @default(true)
+  isPopular        Boolean                @default(false)
+  preparationTime  Int                    @default(15) // minutes
+  calories         Int?
+  allergens        String[]               // Array of allergen codes
+  spicyLevel       Int                    @default(0) // 0-5 scale
+  categoryId       Int
+  isDeleted        Boolean                @default(false)
+  deletedAt        DateTime?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  
+  // Relations
+  category         Category               @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  translations     MenuItemTranslation[]
+  orderItems       OrderItem[]
+  
+  @@map("menu_items")
+}
+
+// Multi-language support for menu items
+model MenuItemTranslation {
+  id          Int      @id @default(autoincrement())
+  menuItemId  Int
+  language    String   // 'hu', 'en', 'sk'
+  name        String
+  description String?
+  
+  // Relations
+  menuItem    MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  
+  @@unique([menuItemId, language])
+  @@map("menu_item_translations")
+}
+
+// Sauce options for customization
+model Sauce {
+  id        Int      @id @default(autoincrement())
+  slug      String   @unique
+  price     Float    @default(0.00)
+  isDefault Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  translations SauceTranslation[]
+  
+  @@map("sauces")
+}
+
+// Multi-language support for sauces
+model SauceTranslation {
+  id       Int    @id @default(autoincrement())
+  sauceId  Int
+  language String // 'hu', 'en', 'sk'
+  name     String
+  
+  // Relations
+  sauce    Sauce  @relation(fields: [sauceId], references: [id], onDelete: Cascade)
+  
+  @@unique([sauceId, language])
+  @@map("sauce_translations")
+}
+
+// Fries upgrade options
+model FriesOption {
+  id         Int      @id @default(autoincrement())
+  slug       String   @unique
+  priceAddon Float    @default(0.00)
+  isDefault  Boolean  @default(false)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  // Relations
+  translations FriesOptionTranslation[]
+  
+  @@map("fries_options")
+}
+
+// Multi-language support for fries options
+model FriesOptionTranslation {
+  id            Int         @id @default(autoincrement())
+  friesOptionId Int
+  language      String      // 'hu', 'en', 'sk'
+  name          String
+  
+  // Relations
+  friesOption   FriesOption @relation(fields: [friesOptionId], references: [id], onDelete: Cascade)
+  
+  @@unique([friesOptionId, language])
+  @@map("fries_option_translations")
+}
+
+// Customer accounts
+model Customer {
+  id            Int       @id @default(autoincrement())
+  email         String    @unique
+  firstName     String
+  lastName      String
+  phone         String?
+  dateOfBirth   DateTime?
+  isActive      Boolean   @default(true)
+  emailVerified Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relations
+  orders        Order[]
+  addresses     CustomerAddress[]
+  
+  @@map("customers")
+}
+
+// Customer delivery addresses
+model CustomerAddress {
+  id         Int      @id @default(autoincrement())
+  customerId Int
+  label      String   // "Home", "Work", etc.
+  street     String
+  city       String
+  postalCode String
+  isDefault  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  // Relations
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  orders     Order[]
+  
+  @@map("customer_addresses")
+}
+
+// Orders
+model Order {
+  id                Int               @id @default(autoincrement())
+  orderNumber       String            @unique // PCB-20241213-001
+  status            OrderStatus       @default(PENDING)
+  orderType         OrderType         // DELIVERY, PICKUP
+  paymentMethod     PaymentMethod     // CASH, CARD, ONLINE
+  paymentStatus     PaymentStatus     @default(PENDING)
+  
+  // Customer info (can exist without customer account)
+  customerId        Int?
+  customerName      String
+  customerPhone     String
+  customerEmail     String?
+  
+  // Delivery info
+  addressId         Int?
+  deliveryAddress   String?
+  deliveryNotes     String?
+  
+  // Pricing
+  subtotal          Float
+  deliveryFee       Float             @default(0.00)
+  discount          Float             @default(0.00)
+  total             Float
+  
+  // Timing
+  scheduledFor      DateTime?         // For scheduled orders
+  estimatedTime     DateTime?         // Estimated ready/delivery time
+  confirmedAt       DateTime?
+  acceptedAt        DateTime?
+  readyAt           DateTime?
+  deliveredAt       DateTime?
+  
+  // Special requests
+  specialNotes      String?
+  removeIngredients String?
+  
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  
+  // Relations
+  customer          Customer?         @relation(fields: [customerId], references: [id])
+  address           CustomerAddress?  @relation(fields: [addressId], references: [id])
+  items             OrderItem[]
+  payments          Payment[]
+  
+  @@map("orders")
+}
+
+// Items within an order
+model OrderItem {
+  id               Int      @id @default(autoincrement())
+  orderId          Int
+  menuItemId       Int
+  quantity         Int
+  unitPrice        Float
+  totalPrice       Float
+  
+  // Customizations
+  selectedSauce    String?  // Sauce name or ID
+  friesUpgrade     String?  // Fries option name or ID
+  extras           String[] // Array of extra ingredients
+  removeItems      String[] // Array of ingredients to remove
+  specialNotes     String?
+  
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  // Relations
+  order            Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem         MenuItem @relation(fields: [menuItemId], references: [id])
+  
+  @@map("order_items")
+}
+
+// Payment records
+model Payment {
+  id              Int           @id @default(autoincrement())
+  orderId         Int
+  paymentMethod   PaymentMethod
+  status          PaymentStatus @default(PENDING)
+  amount          Float
+  currency        String        @default("EUR")
+  transactionId   String?       // External payment gateway transaction ID
+  gatewayResponse Json?         // Full response from payment gateway
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  // Relations
+  order           Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  @@map("payments")
+}
+
+// Admin users for management panel
+model AdminUser {
+  id          Int       @id @default(autoincrement())
+  email       String    @unique
+  firstName   String
+  lastName    String
+  password    String    // Hashed
+  role        AdminRole @default(STAFF)
+  isActive    Boolean   @default(true)
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@map("admin_users")
+}
+
+// App-wide settings
+model Setting {
+  id    Int    @id @default(autoincrement())
+  key   String @unique
+  value String
+  type  String @default("string") // string, number, boolean, json
+  
+  @@map("settings")
+}
+
+// Enums
+enum OrderStatus {
+  PENDING     // Just placed, awaiting confirmation
+  CONFIRMED   // Restaurant confirmed the order
+  PREPARING   // Food is being prepared
+  READY       // Ready for pickup/delivery
+  OUT_FOR_DELIVERY // Driver picked up (delivery only)
+  DELIVERED   // Successfully delivered/picked up
+  CANCELLED   // Order was cancelled
+  REFUNDED    // Order was refunded
+}
+
+enum OrderType {
+  DELIVERY
+  PICKUP
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  ONLINE
+  TRANSFER
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  ADMIN
+  MANAGER
+  STAFF
+}
