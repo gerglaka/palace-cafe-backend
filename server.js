@@ -627,6 +627,7 @@ app.get('/api/orders/:orderNumber/status', asyncHandler(async (req, res) => {
   }
 }));
 
+const httpServer = createServer(app);
 // Create HTTP server and Socket.io instance
 const io = new Server(httpServer, {
   cors: {
@@ -2952,6 +2953,7 @@ module.exports = app;
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
 });
+
 
 
 
