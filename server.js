@@ -2949,8 +2949,9 @@ process.on('SIGINT', async () => {
 
 module.exports = app;
 
-httpServer.listen(3001, () => {
-  console.log('Server running on http://localhost:3001');
+httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
 });
+
 
 
