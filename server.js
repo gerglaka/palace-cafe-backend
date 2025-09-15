@@ -39,12 +39,12 @@ app.use(helmet({
 // CORS configuration
 app.use(cors({
   origin: [
+    'https://palacebar.sk',
     'http://localhost:3000',
     'http://127.0.0.1:3000',
     'http://localhost:5500',
     'http://127.0.0.1:5500',
-    'https://your-domain.websupport.sk', // Add your actual domain
-    'file://' // For local development
+    'file://' 
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
@@ -628,25 +628,31 @@ app.get('/api/orders/:orderNumber/status', asyncHandler(async (req, res) => {
 }));
 
 // Create HTTP server and Socket.io instance
-const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: ['http://localhost:3000', 'http://127.0.0.1:5500'],
+    origin: ['https://palacebar.sk', 'https://www.palacebar.sk', 'http://localhost:3000', 'http://127.0.0.1:5500'],
     methods: ['GET', 'POST'],
     credentials: true
   }
 });
 
 // Nodemailer setup (stub for email notifications)
-const transporter = nodemailer.createTransport({
-  host: 'smtp.example.com', // Replace with your SMTP host (e.g., Gmail, SendGrid)
-  port: 587,
-  secure: false,
-  auth: {
-    user: 'your-email@example.com', // Replace with your email
-    pass: 'your-email-password' // Replace with your email password or app-specific password
+//const transporter = nodemailer.createTransport({
+  //host: 'smtp.example.com', // Replace with your SMTP host (e.g., Gmail, SendGrid)
+  //port: 587,
+  //secure: false,
+  //auth: {
+    //user: 'your-email@example.com', // Replace with your email
+    //pass: 'your-email-password' // Replace with your email password or app-specific password
+  //}
+//});
+
+const transporter = {
+  sendMail: (options, callback) => {
+    console.log('Email would be sent to:', options.to, 'Subject:', options.subject);
+    if (callback) callback(null, { messageId: 'email-disabled-' + Date.now() });
   }
-});
+};
 
 // Socket.io connection for real-time order updates
 io.on('connection', (socket) => {
@@ -2946,4 +2952,5 @@ module.exports = app;
 httpServer.listen(3001, () => {
   console.log('Server running on http://localhost:3001');
 });
+
 
