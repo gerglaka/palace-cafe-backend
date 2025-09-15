@@ -11,7 +11,8 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
-    "db:seed": "node prisma/seed.js"
+    "db:seed": "node prisma/seed.js",
+    "seed":"node import-menu.js"
   },
   "author": "",
   "license": "ISC",
