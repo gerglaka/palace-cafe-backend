@@ -2015,12 +2015,12 @@ app.get('/api/admin/stats/payment-methods', authenticateAdmin, asyncHandler(asyn
 
 
 // Static file serving for menu images
-app.use('/images/menu', express.static('C:\\Users\\gergi\\OneDrive\\Desktop\\Palace2\\Frontend\\assets\\images\\menu'));
+app.use('/assets/images/menu', express.static(path.join(__dirname, 'assets', 'images', 'menu')));
 
 // Configure multer for image uploads
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
-    const uploadDir = 'C:\\Users\\gergi\\OneDrive\\Desktop\\Palace2\\Frontend\\assets\\images\\menu';
+    const uploadDir = path.join(__dirname, 'assets', 'images', 'menu');
     try {
       await fs.mkdir(uploadDir, { recursive: true });
       cb(null, uploadDir);
@@ -2489,7 +2489,7 @@ app.post('/api/admin/menu/items', authenticateAdmin, upload.single('image'), asy
   if (req.file) {
     try {
       const processedImagePath = path.join(
-        'C:\\Users\\gergi\\OneDrive\\Desktop\\Palace2\\Frontend\\assets\\images\\menu',
+        __dirname, 'assets', 'images', 'menu',
         `processed-${req.file.filename}`
       );
 
@@ -2711,7 +2711,7 @@ app.put('/api/admin/menu/items/:id', authenticateAdmin, upload.single('image'), 
       if (existingItem.imageUrl) {
         try {
           const oldImagePath = path.join(
-            'C:\\Users\\gergi\\OneDrive\\Desktop\\Palace2\\Frontend\\assets\\images\\menu',
+            __dirname, 'assets', 'images', 'menu',
             path.basename(existingItem.imageUrl)
           );
           await fs.unlink(oldImagePath);
@@ -2953,6 +2953,7 @@ module.exports = app;
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
 });
+
 
 
 
