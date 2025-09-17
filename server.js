@@ -21,9 +21,9 @@ const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
 // Configure Cloudinary
 cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'dxaocprhc',
-  api_key: process.env.CLOUDINARY_API_KEY || '664888419247176',
-  api_secret: process.env.CLOUDINARY_API_SECRET || 'js3-He008xNLuClvY1TxEXC_ouE'
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
 require('dotenv').config();
@@ -2863,6 +2863,7 @@ module.exports = app;
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
 });
+
 
 
 
