@@ -16,6 +16,15 @@ const path = require('path');
 const fs = require('fs').promises;
 const sharp = require('sharp');
 const { v4: uuidv4 } = require('uuid');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'dxaocprhc',
+  api_key: process.env.CLOUDINARY_API_KEY || '664888419247176',
+  api_secret: process.env.CLOUDINARY_API_SECRET || 'js3-He008xNLuClvY1TxEXC_ouE'
+});
 
 require('dotenv').config();
 
@@ -2014,38 +2023,21 @@ app.get('/api/admin/stats/payment-methods', authenticateAdmin, asyncHandler(asyn
 // ============================================
 
 
-// Static file serving for menu images
-app.use('/assets/images/menu', express.static(path.join(__dirname, 'assets', 'images', 'menu')));
-
-// Configure multer for image uploads
-const storage = multer.diskStorage({
-  destination: async (req, file, cb) => {
-    const uploadDir = path.join(__dirname, 'assets', 'images', 'menu');
-    try {
-      await fs.mkdir(uploadDir, { recursive: true });
-      cb(null, uploadDir);
-    } catch (error) {
-      cb(error);
-    }
-  },
-  filename: (req, file, cb) => {
-    const uniqueName = `${uuidv4()}-${Date.now()}${path.extname(file.originalname).toLowerCase()}`;
-    cb(null, uniqueName);
+// Configure multer with Cloudinary storage
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'palace-menu',
+    allowed_formats: ['jpeg', 'jpg', 'png', 'webp'],
+    transformation: [
+      { width: 800, height: 600, crop: 'fill' },
+      { quality: 85, format: 'auto' }
+    ]
   }
 });
 
-const fileFilter = (req, file, cb) => {
-  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-  if (allowedTypes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Invalid file type. Only JPEG, PNG, and WebP images are allowed.'), false);
-  }
-};
-
 const upload = multer({
-  storage,
-  fileFilter,
+  storage: storage,
   limits: {
     fileSize: 5 * 1024 * 1024 // 5MB limit
   }
@@ -2483,49 +2475,12 @@ app.post('/api/admin/menu/items', authenticateAdmin, upload.single('image'), asy
     });
   }
 
+  // Process image upload if provided
   let imageUrl = null;
 
-  // Process image upload if provided
   if (req.file) {
-    try {
-      const processedImagePath = path.join(
-        __dirname, 'assets', 'images', 'menu',
-        `processed-${req.file.filename}`
-      );
-
-      // Process image with sharp (resize and optimize)
-      await sharp(req.file.path)
-        .resize(800, 600, { 
-          fit: 'cover',
-          withoutEnlargement: true 
-        })
-        .jpeg({ 
-          quality: 85,
-          progressive: true 
-        })
-        .toFile(processedImagePath);
-
-      // Remove original file
-      await fs.unlink(req.file.path);
-
-      // Set image URL for database
-      imageUrl = `assets/images/menu/processed-${req.file.filename}`;
-
-    } catch (imageError) {
-      console.error('Image processing error:', imageError);
-      // Clean up files
-      try {
-        await fs.unlink(req.file.path);
-      } catch (cleanupError) {
-        console.error('Cleanup error:', cleanupError);
-      }
-      
-      return res.status(400).json({
-        success: false,
-        error: 'Failed to process image'
-      });
-    }
-  }
+    imageUrl = req.file.path; // Cloudinary provides the full URL
+  } 
 
   try {
     // Create menu item with translations
@@ -2589,18 +2544,6 @@ app.post('/api/admin/menu/items', authenticateAdmin, upload.single('image'), asy
     });
 
   } catch (error) {
-    // Clean up uploaded image if database operation fails
-    if (imageUrl) {
-      try {
-        const imagePath = path.join(
-          'C:\\Users\\gergi\\OneDrive\\Desktop\\Palace2\\Frontend\\assets\\images\\menu',
-          path.basename(imageUrl)
-        );
-        await fs.unlink(imagePath);
-      } catch (cleanupError) {
-        console.error('Image cleanup error:', cleanupError);
-      }
-    }
 
     console.error('Create menu item error:', error);
     
@@ -2686,49 +2629,16 @@ app.put('/api/admin/menu/items/:id', authenticateAdmin, upload.single('image'), 
 
   // Process new image upload if provided
   if (req.file) {
-    try {
-      const processedImagePath = path.join(
-        'C:\\Users\\gergi\\OneDrive\\Desktop\\Palace2\\Frontend\\assets\\images\\menu',
-        `processed-${req.file.filename}`
-      );
-
-      // Process image with sharp
-      await sharp(req.file.path)
-        .resize(800, 600, { 
-          fit: 'cover',
-          withoutEnlargement: true 
-        })
-        .jpeg({ 
-          quality: 85,
-          progressive: true 
-        })
-        .toFile(processedImagePath);
-
-      // Remove original file
-      await fs.unlink(req.file.path);
-
-      // Delete old image if exists
-      if (existingItem.imageUrl) {
-        try {
-          const oldImagePath = path.join(
-            __dirname, 'assets', 'images', 'menu',
-            path.basename(existingItem.imageUrl)
-          );
-          await fs.unlink(oldImagePath);
-        } catch (deleteError) {
-          console.log('Old image deletion failed (may not exist):', deleteError.message);
-        }
+    // Delete old image from Cloudinary if exists
+    if (existingItem.imageUrl && existingItem.imageUrl.includes('cloudinary.com')) {
+      try {
+        const publicId = existingItem.imageUrl.split('/').slice(-2).join('/').split('.')[0];
+        await cloudinary.uploader.destroy(publicId);
+      } catch (deleteError) {
+        console.log('Old image deletion failed:', deleteError.message);
       }
-
-      imageUrl = `assets/images/menu/processed-${req.file.filename}`;
-
-    } catch (imageError) {
-      console.error('Image processing error:', imageError);
-      return res.status(400).json({
-        success: false,
-        error: 'Failed to process image'
-      });
     }
+    imageUrl = req.file.path; // Cloudinary provides the full URL
   }
 
   try {
