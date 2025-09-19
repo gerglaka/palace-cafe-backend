@@ -48,6 +48,7 @@ app.use(helmet({
 // CORS configuration
 app.use(cors({
   origin: [
+    'https://palace-cafe-frontend.vercel.app',
     'https://palacebar.sk',
     'http://localhost:3000',
     'http://127.0.0.1:3000',
