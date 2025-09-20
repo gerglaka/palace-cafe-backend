@@ -39,7 +39,7 @@ function initializeTransporter() {
       return null;
     }
 
-    transporter = nodemailer.createTransporter({
+    transporter = nodemailer.createTransport({
       host: EMAIL_CONFIG.smtp.host,
       port: EMAIL_CONFIG.smtp.port,
       secure: EMAIL_CONFIG.smtp.secure,
