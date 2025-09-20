@@ -12,7 +12,7 @@ const { formatCurrency } = require('./invoice-generator');
 const EMAIL_CONFIG = {
   smtp: {
     host: 'smtp.m1.websupport.sk',
-    port: 586,
+    port: 587,
     secure: true, // true for 465, false for other ports
     auth: {
       user: process.env.EMAIL_USER || 'notifications@palacebar.sk',
