@@ -320,6 +320,9 @@ app.get('/api/customization', asyncHandler(async (req, res) => {
 // ORDER MANAGEMENT APIs
 // ============================================
 
+const { generateInvoicePDF, generateInvoiceNumber, getNextInvoiceCounter, calculateVATBreakdown } = require('./utils/invoice-generator');
+const { sendInvoiceEmail, sendOrderConfirmationEmail, testEmailConfig } = require('./utils/email-service');
+
 // Place new order
 app.post('/api/orders', orderLimiter, asyncHandler(async (req, res) => {
   const {
@@ -335,19 +338,10 @@ app.post('/api/orders', orderLimiter, asyncHandler(async (req, res) => {
     paymentMethod // 'CASH', 'CARD', 'ONLINE'
   } = req.body;
 
-  console.log('Extracted fields:');
+  console.log('🛒 Processing new order...');
   console.log('- customerName:', customerName);
-  console.log('- items:', items);
-  console.log('- deliveryNotes:', deliveryNotes);  
-
-    // Log each item's structure
-  items.forEach((item, index) => {
-    console.log(`Item ${index}:`, {
-      menuItemId: item.menuItemId,
-      removeItems: item.removeItems,
-      specialNotes: item.specialNotes
-    });
-  });
+  console.log('- items:', items?.length || 0, 'items');
+  console.log('- paymentMethod:', paymentMethod);
 
   // Validation
   if (!customerName || !customerPhone || !items || items.length === 0) {
@@ -364,135 +358,283 @@ app.post('/api/orders', orderLimiter, asyncHandler(async (req, res) => {
     });
   }
 
-  // Get restaurant settings for delivery fee
-  const restaurant = await prisma.restaurant.findFirst();
-  const deliveryFee = (orderType === 'DELIVERY') ? restaurant?.deliveryFee || 2.50 : 0;
+  try {
+    // Get restaurant settings for delivery fee
+    const restaurant = await prisma.restaurant.findFirst();
+    const deliveryFee = (orderType === 'DELIVERY') ? restaurant?.deliveryFee || 2.50 : 0;
 
-  // Calculate totals
-  let subtotal = 0;
-  const orderItems = [];
+    // Calculate totals and prepare order items
+    let subtotal = 0;
+    const orderItems = [];
+    const invoiceItems = []; // For invoice generation
 
-  for (const item of items) {
-    const menuItem = await prisma.menuItem.findUnique({
-      where: { id: item.menuItemId }
-    });
-
-    if (!menuItem) {
-      return res.status(400).json({
-        success: false,
-        error: `Menu item with ID ${item.menuItemId} not found`
+    for (const item of items) {
+      const menuItem = await prisma.menuItem.findUnique({
+        where: { id: item.menuItemId },
+        include: {
+          translations: { where: { language: 'hu' } }
+        }
       });
-    }
 
-    let itemTotal = menuItem.price * item.quantity;
-    
-    // Add fries upgrade cost - check if sides are included
-    if (item.friesUpgrade) {
-      const friesOption = await prisma.friesOption.findFirst({
-        where: { slug: item.friesUpgrade }
-      });
+      if (!menuItem) {
+        return res.status(400).json({
+          success: false,
+          error: `Menu item with ID ${item.menuItemId} not found`
+        });
+      }
+
+      let itemTotal = menuItem.price * item.quantity;
+      let customizations = [];
       
-      if (friesOption) {
-        if (menuItem.includesSides) {
-          // Items WITH sides included - regular fries are FREE, only charge for upgrades
-          if (friesOption.slug !== 'regular' && friesOption.slug !== 'regular-fries') {
-            itemTotal += friesOption.priceAddon * item.quantity;
-            console.log(`Added fries upgrade: ${friesOption.slug} (+€${friesOption.priceAddon})`);
+      // Add fries upgrade cost - check if sides are included
+      if (item.friesUpgrade) {
+        const friesOption = await prisma.friesOption.findFirst({
+          where: { slug: item.friesUpgrade },
+          include: { translations: { where: { language: 'hu' } } }
+        });
+        
+        if (friesOption) {
+          if (menuItem.includesSides) {
+            // Items WITH sides included - regular fries are FREE, only charge for upgrades
+            if (friesOption.slug !== 'regular' && friesOption.slug !== 'regular-fries') {
+              itemTotal += friesOption.priceAddon * item.quantity;
+              customizations.push(`${friesOption.translations[0]?.name || friesOption.slug} (+€${friesOption.priceAddon})`);
+            } else {
+              customizations.push(friesOption.translations[0]?.name || 'Regular fries');
+            }
           } else {
-            console.log(`Regular fries included for free (includesSides: true)`);
+            // Items WITHOUT sides included - charge full price for any fries
+            itemTotal += friesOption.priceAddon * item.quantity;
+            customizations.push(`${friesOption.translations[0]?.name || friesOption.slug} (+€${friesOption.priceAddon})`);
           }
-        } else {
-          // Items WITHOUT sides included - charge full price for any fries
-          itemTotal += friesOption.priceAddon * item.quantity;
-          console.log(`Added fries addon: ${friesOption.slug} (+€${friesOption.priceAddon})`);
         }
       }
-    }
 
-    // Add extras cost (assuming €0.30 per extra)
-    if (item.extras && item.extras.length > 0) {
-      itemTotal += (item.extras.length * 0.30) * item.quantity;
-    }
-
-    subtotal += itemTotal;
-    
-    orderItems.push({
-      menuItemId: item.menuItemId,
-      quantity: item.quantity,
-      unitPrice: menuItem.price,
-      totalPrice: itemTotal,
-      selectedSauce: item.selectedSauce || null,
-      friesUpgrade: item.friesUpgrade || null,
-      extras: item.extras || [],
-      removeItems: item.removeItems || [],
-      specialNotes: item.specialNotes || null
-    });
-  }
-
-  const total = subtotal + deliveryFee;
-
-  // Create order
-  const order = await prisma.order.create({
-    data: {
-      orderNumber: generateOrderNumber(),
-      status: 'PENDING',
-      orderType,
-      paymentMethod: paymentMethod || 'CASH',
-      customerName,
-      customerPhone,
-      customerEmail: customerEmail || null,
-      deliveryAddress: orderType === 'DELIVERY' ? deliveryAddress : null,
-      deliveryNotes: deliveryNotes || null,
-      specialNotes: specialNotes || null,
-      subtotal,
-      deliveryFee,
-      total,
-      scheduledFor: scheduledFor ? new Date(scheduledFor) : null,
-      estimatedTime: new Date(Date.now() + 45 * 60 * 1000), // 45 minutes from now
-      items: {
-        create: orderItems
+      // Add sauce selection
+      if (item.selectedSauce) {
+        const sauce = await prisma.sauce.findFirst({
+          where: { slug: item.selectedSauce },
+          include: { translations: { where: { language: 'hu' } } }
+        });
+        if (sauce) {
+          customizations.push(sauce.translations[0]?.name || sauce.slug);
+        }
       }
-    },
-    include: {
-      items: {
-        include: {
-          menuItem: {
-            include: {
-              translations: {
-                where: { language: 'hu' }
+
+      // Add extras cost (€0.30 per extra)
+      if (item.extras && item.extras.length > 0) {
+        const extrasCount = item.extras.length;
+        const extrasCost = extrasCount * 0.30;
+        itemTotal += extrasCost * item.quantity;
+        customizations.push(`${extrasCount} extra(s) (+€${extrasCost.toFixed(2)})`);
+      }
+
+      subtotal += itemTotal;
+      
+      // For database
+      orderItems.push({
+        menuItemId: item.menuItemId,
+        quantity: item.quantity,
+        unitPrice: menuItem.price,
+        totalPrice: itemTotal,
+        selectedSauce: item.selectedSauce || null,
+        friesUpgrade: item.friesUpgrade || null,
+        extras: item.extras || [],
+        removeItems: item.removeItems || [],
+        specialNotes: item.specialNotes || null
+      });
+
+      // For invoice
+      invoiceItems.push({
+        slug: menuItem.slug,
+        name: menuItem.translations[0]?.name || 'Unknown Item',
+        quantity: item.quantity,
+        unitPrice: menuItem.price,
+        totalPrice: itemTotal,
+        customizations: customizations.join(', ')
+      });
+    }
+
+    const total = subtotal + deliveryFee;
+
+    // Create order in database
+    const order = await prisma.order.create({
+      data: {
+        orderNumber: generateOrderNumber(),
+        status: 'PENDING',
+        orderType,
+        paymentMethod: paymentMethod || 'CASH',
+        customerName,
+        customerPhone,
+        customerEmail: customerEmail || null,
+        deliveryAddress: orderType === 'DELIVERY' ? deliveryAddress : null,
+        deliveryNotes: deliveryNotes || null,
+        specialNotes: specialNotes || null,
+        subtotal,
+        deliveryFee,
+        total,
+        scheduledFor: scheduledFor ? new Date(scheduledFor) : null,
+        estimatedTime: new Date(Date.now() + 45 * 60 * 1000), // 45 minutes from now
+        items: {
+          create: orderItems
+        }
+      },
+      include: {
+        items: {
+          include: {
+            menuItem: {
+              include: {
+                translations: {
+                  where: { language: 'hu' }
+                }
               }
             }
           }
         }
       }
+    });
+
+    console.log(`✅ Order created: ${order.orderNumber}`);
+
+    // Generate invoice
+    try {
+      console.log('📄 Generating invoice...');
+      
+      // Get next invoice number
+      const currentYear = new Date().getFullYear();
+      const invoiceCounter = await getNextInvoiceCounter(paymentMethod || 'CASH', currentYear, prisma);
+      const invoiceNumber = generateInvoiceNumber(paymentMethod || 'CASH', currentYear, invoiceCounter);
+      
+      // Calculate VAT breakdown
+      const vatBreakdown = calculateVATBreakdown(total);
+      
+      // Create invoice record
+      const invoice = await prisma.invoice.create({
+        data: {
+          invoiceNumber,
+          orderId: order.id,
+          customerName,
+          customerEmail: customerEmail || null,
+          customerPhone,
+          subtotal,
+          deliveryFee,
+          totalNet: vatBreakdown.netAmount,
+          vatAmount: vatBreakdown.vatAmount,
+          totalGross: vatBreakdown.grossAmount,
+          paymentMethod: paymentMethod || 'CASH',
+          orderItems: invoiceItems, // Store as JSON
+          emailSent: false
+        },
+        include: {
+          order: true
+        }
+      });
+
+      console.log(`📋 Invoice created: ${invoiceNumber}`);
+
+      // Generate PDF
+      const pdfBuffer = await generateInvoicePDF({
+        ...invoice,
+        orderItems: invoiceItems
+      });
+
+      console.log('📧 PDF generated, attempting to send email...');
+
+      // Send invoice email if email provided
+      if (customerEmail) {
+        try {
+          const emailResult = await sendInvoiceEmail(invoice, pdfBuffer, customerEmail);
+          
+          if (emailResult.success) {
+            // Update invoice record
+            await prisma.invoice.update({
+              where: { id: invoice.id },
+              data: {
+                emailSent: true,
+                emailSentAt: new Date(),
+                emailAttempts: 1
+              }
+            });
+            console.log(`✅ Invoice email sent to ${customerEmail}`);
+          } else {
+            console.log(`⚠️ Failed to send invoice email: ${emailResult.error}`);
+            // Don't fail the order, just log the issue
+          }
+        } catch (emailError) {
+          console.error('❌ Email sending error:', emailError);
+          // Update invoice with failed attempt
+          await prisma.invoice.update({
+            where: { id: invoice.id },
+            data: {
+              emailAttempts: 1
+            }
+          });
+        }
+      } else {
+        console.log('📧 No customer email provided, skipping invoice email');
+      }
+
+    } catch (invoiceError) {
+      console.error('❌ Invoice generation failed:', invoiceError);
+      // Don't fail the order, but log the issue
+      // The order was created successfully, invoice can be generated later
     }
-  });
 
-  io.emit('newOrder', {
-    id: order.id,
-    orderNumber: order.orderNumber,
-    status: order.status,
-    customerName: order.customerName,
-    orderType: order.orderType,
-    total: order.total,
-    createdAt: order.createdAt,
-    items: order.items.map(item => ({
-      name: item.menuItem.translations[0]?.name || 'Unknown',
-      quantity: item.quantity
-    }))
-  });
-
-  res.status(201).json({
-    success: true,
-    data: {
-      orderId: order.id,
+    // Emit WebSocket event for admin dashboard
+    io.emit('newOrder', {
+      id: order.id,
       orderNumber: order.orderNumber,
       status: order.status,
-      estimatedTime: order.estimatedTime,
-      total: order.total
-    },
-    message: 'Order placed successfully!'
-  });
+      customerName: order.customerName,
+      orderType: order.orderType,
+      total: order.total,
+      createdAt: order.createdAt,
+      items: order.items.map(item => ({
+        name: item.menuItem.translations[0]?.name || 'Unknown',
+        quantity: item.quantity
+      }))
+    });
+
+    console.log(`🎉 Order ${order.orderNumber} completed successfully`);
+
+    // Send order confirmation email (separate from invoice)
+    if (customerEmail) {
+      try {
+        await sendOrderConfirmationEmail({
+          orderNumber: order.orderNumber,
+          customerName,
+          orderType,
+          total
+        }, customerEmail);
+        console.log(`📧 Order confirmation sent to ${customerEmail}`);
+      } catch (confirmationError) {
+        console.error('❌ Order confirmation email failed:', confirmationError);
+        // Don't fail the order
+      }
+    }
+
+    // Return success response
+    res.status(201).json({
+      success: true,
+      data: {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+        estimatedTime: order.estimatedTime,
+        total: order.total,
+        invoiceGenerated: true
+      },
+      message: 'Order placed successfully! Invoice will be sent to your email.'
+    });
+
+  } catch (error) {
+    console.error('❌ Order creation failed:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create order',
+      details: error.message
+    });
+  }
 }));
 
 // Get order status
