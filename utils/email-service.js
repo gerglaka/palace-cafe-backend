@@ -1,33 +1,70 @@
 /**
  * Palace Cafe & Street Food - Email Service
- * Professional email service with SendGrid integration
+ * Professional email service with Websuport SMTP integration
  * Invoice delivery and order notifications
  * Bilingual Slovak/Hungarian support
  */
 
-const sgMail = require('@sendgrid/mail');
+const nodemailer = require('nodemailer');
 const { formatCurrency } = require('./invoice-generator');
 
-// Initialize SendGrid with API key from environment
-if (process.env.SENDGRID_API_KEY) {
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-}
-
-// Email configuration
+// Email configuration for Websuport SMTP
 const EMAIL_CONFIG = {
+  smtp: {
+    host: 'smtp.m1.websupport.sk',
+    port: 465,
+    secure: true, // true for 465, false for other ports
+    auth: {
+      user: process.env.EMAIL_USER || 'notifications@palacebar.sk',
+      pass: process.env.EMAIL_PASS
+    }
+  },
   from: {
-    email: process.env.FROM_EMAIL || 'noreply@palacecafe.sk',
+    email: process.env.FROM_EMAIL || 'notifications@palacebar.sk',
     name: 'Palace Cafe & Street Food'
   },
-  replyTo: process.env.REPLY_TO_EMAIL || 'info@palacecafe.sk'
+  replyTo: process.env.REPLY_TO_EMAIL || 'admin@palacebar.sk'
 };
+
+// Create SMTP transporter
+let transporter = null;
+
+/**
+ * Initialize email transporter
+ */
+function initializeTransporter() {
+  try {
+    if (!process.env.EMAIL_PASS) {
+      console.log('⚠️ Email service not configured - EMAIL_PASS not set');
+      return null;
+    }
+
+    transporter = nodemailer.createTransporter({
+      host: EMAIL_CONFIG.smtp.host,
+      port: EMAIL_CONFIG.smtp.port,
+      secure: EMAIL_CONFIG.smtp.secure,
+      auth: EMAIL_CONFIG.smtp.auth,
+      // Additional options for better reliability
+      pool: true, // Use pooled connections
+      maxConnections: 5,
+      maxMessages: 100
+    });
+
+    console.log('✅ Email transporter initialized with Websuport SMTP');
+    return transporter;
+    
+  } catch (error) {
+    console.error('❌ Failed to initialize email transporter:', error);
+    return null;
+  }
+}
 
 /**
  * Send invoice email with PDF attachment
  * @param {Object} invoiceData - Invoice data from database
  * @param {Buffer} pdfBuffer - Generated PDF buffer
  * @param {string} customerEmail - Customer's email address
- * @returns {Promise<Object>} SendGrid response
+ * @returns {Promise<Object>} Email sending response
  */
 async function sendInvoiceEmail(invoiceData, pdfBuffer, customerEmail) {
   try {
@@ -38,8 +75,13 @@ async function sendInvoiceEmail(invoiceData, pdfBuffer, customerEmail) {
       return { success: false, error: 'Invalid email address' };
     }
 
-    if (!process.env.SENDGRID_API_KEY) {
-      console.log('⚠️ SendGrid not configured, skipping email send');
+    // Initialize transporter if not already done
+    if (!transporter) {
+      transporter = initializeTransporter();
+    }
+
+    if (!transporter) {
+      console.log('⚠️ Email service not configured, skipping email send');
       return { success: false, error: 'Email service not configured' };
     }
 
@@ -47,57 +89,57 @@ async function sendInvoiceEmail(invoiceData, pdfBuffer, customerEmail) {
     const emailContent = generateInvoiceEmailContent(invoiceData);
     
     // Prepare email message
-    const msg = {
+    const mailOptions = {
+      from: `${EMAIL_CONFIG.from.name} <${EMAIL_CONFIG.from.email}>`,
       to: customerEmail,
-      from: EMAIL_CONFIG.from,
       replyTo: EMAIL_CONFIG.replyTo,
       subject: emailContent.subject,
       html: emailContent.html,
       text: emailContent.text,
       attachments: [
         {
-          content: pdfBuffer.toString('base64'),
           filename: `faktura-${invoiceData.invoiceNumber}.pdf`,
-          type: 'application/pdf',
-          disposition: 'attachment'
+          content: pdfBuffer,
+          contentType: 'application/pdf'
         }
       ],
-      // Email categories for SendGrid analytics
-      categories: ['invoice', 'palace-cafe'],
-      // Custom args for tracking
-      customArgs: {
-        invoice_id: invoiceData.id.toString(),
-        order_id: invoiceData.orderId.toString(),
-        invoice_number: invoiceData.invoiceNumber
+      // Custom headers for tracking
+      headers: {
+        'X-Invoice-ID': invoiceData.id.toString(),
+        'X-Order-ID': invoiceData.orderId.toString(),
+        'X-Invoice-Number': invoiceData.invoiceNumber
       }
     };
 
     // Send email
     console.log(`📤 Sending invoice email to ${customerEmail}...`);
-    const response = await sgMail.send(msg);
+    const result = await transporter.sendMail(mailOptions);
     
     console.log(`✅ Invoice email sent successfully to ${customerEmail}`);
+    console.log(`📧 Message ID: ${result.messageId}`);
+    
     return { 
       success: true, 
-      messageId: response[0].headers['x-message-id'],
-      response: response[0]
+      messageId: result.messageId,
+      response: result.response
     };
     
   } catch (error) {
     console.error('❌ Failed to send invoice email:', error);
     
     // Log detailed error for debugging
-    if (error.response) {
-      console.error('SendGrid error details:', {
-        statusCode: error.response.statusCode,
-        body: error.response.body
+    if (error.code) {
+      console.error('SMTP Error details:', {
+        code: error.code,
+        command: error.command,
+        response: error.response
       });
     }
     
     return { 
       success: false, 
       error: error.message,
-      details: error.response?.body || null
+      code: error.code || null
     };
   }
 }
@@ -271,8 +313,8 @@ function generateInvoiceEmailContent(invoiceData) {
         </p>
         
         <p style="font-size: 12px; color: #999; margin-top: 20px;">
-            Tento email bol odoslaný automaticky. Prosím neodpovedajte na túto správu.<br>
-            <em>Ez az email automatikusan lett elküldve. Kérjük, ne válaszoljon erre az üzenetre.</em>
+            Pre otázky nás kontaktujte na: ${EMAIL_CONFIG.replyTo}<br>
+            <em>Kérdések esetén írjon nekünk: ${EMAIL_CONFIG.replyTo}</em>
         </p>
     </div>
 </body>
@@ -299,6 +341,8 @@ V prílohe nájdete PDF faktúru.
 Ďakujeme za dôveru!
 Palace Cafe & Street Food s.r.o.
 Hradná 168/2, 945 01 Komárno
+
+Kontakt: ${EMAIL_CONFIG.replyTo}
 `;
 
   return { subject, html, text };
@@ -377,15 +421,24 @@ async function sendOrderConfirmationEmail(orderData, customerEmail) {
   try {
     console.log(`📧 Preparing order confirmation for ${customerEmail}`);
     
-    if (!customerEmail || !process.env.SENDGRID_API_KEY) {
-      return { success: false, error: 'Email service not available' };
+    if (!customerEmail) {
+      return { success: false, error: 'No email address provided' };
+    }
+
+    // Initialize transporter if not already done
+    if (!transporter) {
+      transporter = initializeTransporter();
+    }
+
+    if (!transporter) {
+      return { success: false, error: 'Email service not configured' };
     }
 
     const orderType = orderData.orderType === 'DELIVERY' ? 'doručenie / szállítás' : 'vyzdvihnutie / átvétel';
     
-    const msg = {
+    const mailOptions = {
+      from: `${EMAIL_CONFIG.from.name} <${EMAIL_CONFIG.from.email}>`,
       to: customerEmail,
-      from: EMAIL_CONFIG.from,
       replyTo: EMAIL_CONFIG.replyTo,
       subject: `Potvrdenie objednávky #${orderData.orderNumber} - Palace Cafe`,
       html: `
@@ -409,15 +462,35 @@ async function sendOrderConfirmationEmail(orderData, customerEmail) {
             <p>Budeme vás informovať o ďalších krokoch emailom.</p>
             <p><em>A további lépésekről email-ben tájékoztatjuk.</em></p>
           </div>
+          
+          <div style="text-align: center; padding: 20px; color: #666;">
+            <p>Palace Cafe & Street Food s.r.o.<br>
+            Hradná 168/2, 945 01 Komárno</p>
+          </div>
         </div>
       `,
-      categories: ['order-confirmation', 'palace-cafe']
+      text: `
+Palace Cafe & Street Food - Potvrdenie objednávky #${orderData.orderNumber}
+
+Dobrý deň ${orderData.customerName},
+
+Vaša objednávka #${orderData.orderNumber} bola úspešne prijatá!
+
+Typ: ${orderType}
+Suma: ${formatCurrency(orderData.total)}
+Stav: Spracováva sa
+
+Budeme vás informovať o ďalších krokoch.
+
+Palace Cafe & Street Food s.r.o.
+Hradná 168/2, 945 01 Komárno
+`
     };
 
-    const response = await sgMail.send(msg);
+    const result = await transporter.sendMail(mailOptions);
     console.log(`✅ Order confirmation sent to ${customerEmail}`);
     
-    return { success: true, messageId: response[0].headers['x-message-id'] };
+    return { success: true, messageId: result.messageId };
     
   } catch (error) {
     console.error('❌ Failed to send order confirmation:', error);
@@ -430,34 +503,52 @@ async function sendOrderConfirmationEmail(orderData, customerEmail) {
  */
 async function testEmailConfig() {
   try {
-    if (!process.env.SENDGRID_API_KEY) {
+    if (!process.env.EMAIL_PASS) {
       return { 
         success: false, 
-        error: 'SENDGRID_API_KEY environment variable not set' 
+        error: 'EMAIL_PASS environment variable not set' 
       };
     }
     
-    if (!process.env.FROM_EMAIL) {
+    if (!process.env.EMAIL_USER) {
       return { 
         success: false, 
-        error: 'FROM_EMAIL environment variable not set' 
+        error: 'EMAIL_USER environment variable not set' 
       };
     }
+
+    // Test connection
+    if (!transporter) {
+      transporter = initializeTransporter();
+    }
+
+    if (!transporter) {
+      return { success: false, error: 'Failed to initialize email transporter' };
+    }
+
+    // Verify SMTP connection
+    await transporter.verify();
     
-    console.log('✅ Email configuration appears valid');
+    console.log('✅ Email configuration is valid and SMTP connection successful');
     return { 
       success: true, 
       config: {
-        hasApiKey: !!process.env.SENDGRID_API_KEY,
-        fromEmail: process.env.FROM_EMAIL,
-        replyTo: process.env.REPLY_TO_EMAIL
+        host: EMAIL_CONFIG.smtp.host,
+        port: EMAIL_CONFIG.smtp.port,
+        user: EMAIL_CONFIG.smtp.auth.user,
+        fromEmail: EMAIL_CONFIG.from.email,
+        replyTo: EMAIL_CONFIG.replyTo
       }
     };
     
   } catch (error) {
+    console.error('❌ Email configuration test failed:', error);
     return { success: false, error: error.message };
   }
 }
+
+// Initialize transporter on module load
+initializeTransporter();
 
 module.exports = {
   sendInvoiceEmail,
