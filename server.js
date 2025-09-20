@@ -2958,6 +2958,467 @@ app.patch('/api/admin/menu/items/:id/restore', authenticateAdmin, asyncHandler(a
   }
 }));
 
+// ============================================
+// ADMIN INVOICE MANAGEMENT APIs
+// ============================================
+
+// Get all invoices with filtering and pagination
+app.get('/api/admin/invoices', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { 
+    page = 1, 
+    limit = 20, 
+    paymentMethod, 
+    month, 
+    year = new Date().getFullYear(),
+    search 
+  } = req.query;
+
+  console.log(`📋 Admin requesting invoices - Page: ${page}, Payment: ${paymentMethod}`);
+
+  try {
+    // Build filter conditions
+    const where = {};
+    
+    if (paymentMethod && paymentMethod !== 'ALL') {
+      where.paymentMethod = paymentMethod;
+    }
+    
+    // Date filtering
+    if (month && year) {
+      const startDate = new Date(year, month - 1, 1);
+      const endDate = new Date(year, month, 0, 23, 59, 59);
+      where.createdAt = {
+        gte: startDate,
+        lte: endDate
+      };
+    } else if (year) {
+      const startDate = new Date(year, 0, 1);
+      const endDate = new Date(year, 11, 31, 23, 59, 59);
+      where.createdAt = {
+        gte: startDate,
+        lte: endDate
+      };
+    }
+    
+    // Search by customer name or invoice number
+    if (search) {
+      where.OR = [
+        { customerName: { contains: search, mode: 'insensitive' } },
+        { invoiceNumber: { contains: search, mode: 'insensitive' } }
+      ];
+    }
+
+    // Get total count for pagination
+    const totalCount = await prisma.invoice.count({ where });
+    
+    // Get invoices with pagination
+    const invoices = await prisma.invoice.findMany({
+      where,
+      include: {
+        order: {
+          select: {
+            orderNumber: true,
+            orderType: true,
+            status: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' },
+      skip: (parseInt(page) - 1) * parseInt(limit),
+      take: parseInt(limit)
+    });
+
+    // Calculate summary stats for the filtered results
+    const summaryStats = await prisma.invoice.aggregate({
+      where,
+      _sum: {
+        totalGross: true,
+        totalNet: true,
+        vatAmount: true
+      },
+      _count: true
+    });
+
+    console.log(`✅ Retrieved ${invoices.length} invoices`);
+
+    res.json({
+      success: true,
+      data: {
+        invoices: invoices.map(invoice => ({
+          id: invoice.id,
+          invoiceNumber: invoice.invoiceNumber,
+          customerName: invoice.customerName,
+          customerEmail: invoice.customerEmail,
+          paymentMethod: invoice.paymentMethod,
+          totalGross: invoice.totalGross,
+          totalNet: invoice.totalNet,
+          vatAmount: invoice.vatAmount,
+          emailSent: invoice.emailSent,
+          createdAt: invoice.createdAt,
+          order: invoice.order
+        })),
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: totalCount,
+          pages: Math.ceil(totalCount / parseInt(limit))
+        },
+        summary: {
+          count: summaryStats._count,
+          totalRevenue: summaryStats._sum.totalGross || 0,
+          totalNet: summaryStats._sum.totalNet || 0,
+          totalVAT: summaryStats._sum.vatAmount || 0
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to fetch invoices:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch invoices'
+    });
+  }
+}));
+
+// Download specific invoice PDF
+app.get('/api/admin/invoices/:id/pdf', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  console.log(`📄 Admin requesting PDF for invoice ID: ${id}`);
+
+  try {
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: parseInt(id) },
+      include: {
+        order: {
+          include: {
+            items: {
+              include: {
+                menuItem: {
+                  include: {
+                    translations: { where: { language: 'hu' } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        error: 'Invoice not found'
+      });
+    }
+
+    console.log(`📋 Generating PDF for invoice ${invoice.invoiceNumber}`);
+
+    // Generate PDF from stored data
+    const pdfBuffer = await generateInvoicePDF({
+      ...invoice,
+      orderItems: invoice.orderItems // This is stored as JSON
+    });
+
+    // Set headers for PDF download
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="faktura-${invoice.invoiceNumber}.pdf"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+
+    console.log(`✅ PDF generated and sent for ${invoice.invoiceNumber}`);
+    res.send(pdfBuffer);
+
+  } catch (error) {
+    console.error('❌ Failed to generate invoice PDF:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate PDF'
+    });
+  }
+}));
+
+// Resend invoice email
+app.post('/api/admin/invoices/:id/resend-email', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { email } = req.body; // Optional: send to different email
+  
+  console.log(`📧 Admin requesting email resend for invoice ID: ${id}`);
+
+  try {
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: parseInt(id) },
+      include: { order: true }
+    });
+
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        error: 'Invoice not found'
+      });
+    }
+
+    const targetEmail = email || invoice.customerEmail;
+    
+    if (!targetEmail) {
+      return res.status(400).json({
+        success: false,
+        error: 'No email address provided'
+      });
+    }
+
+    // Generate PDF
+    const pdfBuffer = await generateInvoicePDF({
+      ...invoice,
+      orderItems: invoice.orderItems
+    });
+
+    // Send email
+    const emailResult = await sendInvoiceEmail(invoice, pdfBuffer, targetEmail);
+
+    if (emailResult.success) {
+      // Update invoice record
+      await prisma.invoice.update({
+        where: { id: invoice.id },
+        data: {
+          emailSent: true,
+          emailSentAt: new Date(),
+          emailAttempts: (invoice.emailAttempts || 0) + 1
+        }
+      });
+
+      console.log(`✅ Invoice email resent to ${targetEmail}`);
+      res.json({
+        success: true,
+        message: `Invoice email sent to ${targetEmail}`
+      });
+    } else {
+      // Update failed attempt
+      await prisma.invoice.update({
+        where: { id: invoice.id },
+        data: {
+          emailAttempts: (invoice.emailAttempts || 0) + 1
+        }
+      });
+
+      res.status(500).json({
+        success: false,
+        error: emailResult.error
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Failed to resend invoice email:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to resend email'
+    });
+  }
+}));
+
+// Generate monthly invoice report (Excel export)
+app.get('/api/admin/invoices/export/monthly', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { month, year = new Date().getFullYear(), format = 'json' } = req.query;
+
+  console.log(`📊 Admin requesting monthly report - ${month}/${year}`);
+
+  try {
+    // Date range
+    const startDate = month 
+      ? new Date(year, month - 1, 1) 
+      : new Date(year, 0, 1);
+    const endDate = month 
+      ? new Date(year, month, 0, 23, 59, 59)
+      : new Date(year, 11, 31, 23, 59, 59);
+
+    // Get invoices for the period
+    const invoices = await prisma.invoice.findMany({
+      where: {
+        createdAt: {
+          gte: startDate,
+          lte: endDate
+        }
+      },
+      include: {
+        order: {
+          select: {
+            orderNumber: true,
+            orderType: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    // Calculate summary by payment method
+    const cashInvoices = invoices.filter(inv => inv.paymentMethod === 'CASH');
+    const cardInvoices = invoices.filter(inv => inv.paymentMethod === 'CARD' || inv.paymentMethod === 'ONLINE');
+
+    const summary = {
+      period: month ? `${month}/${year}` : year.toString(),
+      cash: {
+        count: cashInvoices.length,
+        totalNet: cashInvoices.reduce((sum, inv) => sum + inv.totalNet, 0),
+        totalVAT: cashInvoices.reduce((sum, inv) => sum + inv.vatAmount, 0),
+        totalGross: cashInvoices.reduce((sum, inv) => sum + inv.totalGross, 0),
+        invoices: cashInvoices.map(inv => ({
+          invoiceNumber: inv.invoiceNumber,
+          date: inv.createdAt,
+          customer: inv.customerName,
+          orderNumber: inv.order?.orderNumber,
+          net: inv.totalNet,
+          vat: inv.vatAmount,
+          gross: inv.totalGross
+        }))
+      },
+      card: {
+        count: cardInvoices.length,
+        totalNet: cardInvoices.reduce((sum, inv) => sum + inv.totalNet, 0),
+        totalVAT: cardInvoices.reduce((sum, inv) => sum + inv.vatAmount, 0),
+        totalGross: cardInvoices.reduce((sum, inv) => sum + inv.totalGross, 0),
+        invoices: cardInvoices.map(inv => ({
+          invoiceNumber: inv.invoiceNumber,
+          date: inv.createdAt,
+          customer: inv.customerName,
+          orderNumber: inv.order?.orderNumber,
+          net: inv.totalNet,
+          vat: inv.vatAmount,
+          gross: inv.totalGross
+        }))
+      },
+      totals: {
+        count: invoices.length,
+        totalNet: invoices.reduce((sum, inv) => sum + inv.totalNet, 0),
+        totalVAT: invoices.reduce((sum, inv) => sum + inv.vatAmount, 0),
+        totalGross: invoices.reduce((sum, inv) => sum + inv.totalGross, 0)
+      }
+    };
+
+    console.log(`✅ Monthly report generated - ${invoices.length} invoices`);
+
+    res.json({
+      success: true,
+      data: summary
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to generate monthly report:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate monthly report'
+    });
+  }
+}));
+
+// ============================================
+// EMAIL SERVICE TEST APIs
+// ============================================
+
+// Test email configuration
+app.get('/api/admin/email/test-config', authenticateAdmin, asyncHandler(async (req, res) => {
+  console.log('🧪 Testing email configuration...');
+  
+  try {
+    const testResult = await testEmailConfig();
+    
+    if (testResult.success) {
+      console.log('✅ Email configuration test passed');
+      res.json({
+        success: true,
+        message: 'Email configuration is valid',
+        config: testResult.config
+      });
+    } else {
+      console.log('❌ Email configuration test failed:', testResult.error);
+      res.status(500).json({
+        success: false,
+        error: testResult.error
+      });
+    }
+  } catch (error) {
+    console.error('❌ Email test error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Email configuration test failed'
+    });
+  }
+}));
+
+// Send test email
+app.post('/api/admin/email/send-test', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      error: 'Email address is required'
+    });
+  }
+
+  console.log(`🧪 Sending test email to ${email}`);
+
+  try {
+    // Create a sample invoice for testing
+    const testInvoiceData = {
+      invoiceNumber: 'TEST-001',
+      customerName: 'Test Customer',
+      customerEmail: email,
+      totalGross: 15.50,
+      paymentMethod: 'CASH',
+      orderItems: [
+        {
+          name: 'Palace Burger',
+          quantity: 1,
+          unitPrice: 8.50,
+          totalPrice: 8.50,
+          customizations: 'Extra cheese'
+        },
+        {
+          name: 'Fanta',
+          quantity: 1,
+          unitPrice: 2.50,
+          totalPrice: 2.50,
+          customizations: ''
+        }
+      ],
+      order: {
+        orderNumber: 'TEST-001',
+        orderType: 'PICKUP'
+      },
+      createdAt: new Date()
+    };
+
+    // Generate test PDF
+    const pdfBuffer = await generateInvoicePDF(testInvoiceData);
+    
+    // Send test email
+    const emailResult = await sendInvoiceEmail(testInvoiceData, pdfBuffer, email);
+
+    if (emailResult.success) {
+      console.log(`✅ Test email sent successfully to ${email}`);
+      res.json({
+        success: true,
+        message: `Test email sent successfully to ${email}`,
+        messageId: emailResult.messageId
+      });
+    } else {
+      console.log(`❌ Test email failed: ${emailResult.error}`);
+      res.status(500).json({
+        success: false,
+        error: emailResult.error
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Test email error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to send test email'
+    });
+  }
+}));
+
 
 // ============================================
 // ERROR HANDLING
