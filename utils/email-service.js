@@ -12,7 +12,7 @@ const { formatCurrency } = require('./invoice-generator');
 const EMAIL_CONFIG = {
   smtp: {
     host: 'smtp.m1.websupport.sk',
-    port: 587,
+    port: 465,
     secure: true, // true for 465, false for other ports
     auth: {
       user: process.env.EMAIL_USER || 'notifications@palacebar.sk',
@@ -67,7 +67,10 @@ function initializeTransporter() {
  * @returns {Promise<Object>} Email sending response
  */
 async function sendInvoiceEmail(invoiceData, pdfBuffer, customerEmail) {
-  try {
+  console.log(`Email sending disabled - would send invoice ${invoiceData.invoiceNumber} to ${customerEmail}`);
+  return { success: true, messageId: 'disabled-' + Date.now() };
+  
+/**   try {
     console.log(`📧 Preparing invoice email for ${customerEmail}`);
     
     if (!customerEmail || !customerEmail.includes('@')) {
@@ -141,8 +144,8 @@ async function sendInvoiceEmail(invoiceData, pdfBuffer, customerEmail) {
       error: error.message,
       code: error.code || null
     };
-  }
-}
+  } */
+} 
 
 /**
  * Generate email content for invoice
@@ -418,6 +421,10 @@ function getPaymentMethodText(paymentMethod) {
  * @param {string} customerEmail - Customer email
  */
 async function sendOrderConfirmationEmail(orderData, customerEmail) {
+  console.log(`Email sending disabled - would send confirmation for ${orderData.orderNumber} to ${customerEmail}`);
+  return { success: true, messageId: 'disabled-' + Date.now() };
+ 
+  /**
   try {
     console.log(`📧 Preparing order confirmation for ${customerEmail}`);
     
@@ -495,7 +502,7 @@ Hradná 168/2, 945 01 Komárno
   } catch (error) {
     console.error('❌ Failed to send order confirmation:', error);
     return { success: false, error: error.message };
-  }
+  }  */
 }
 
 /**
