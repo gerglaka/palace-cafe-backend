@@ -107,7 +107,11 @@ async function main() {
       country: 'Slovakia',
       deliveryFee: 2.50,
       minimumOrder: 5.00,
-      deliveryTime: '30-45 min'
+      deliveryTime: '30-45 min',
+      dic: '2122291578',
+      ico: '56384840',
+      vatNumber: 'SK2122291578',
+      vatRate: '19'
     }
   });
 
