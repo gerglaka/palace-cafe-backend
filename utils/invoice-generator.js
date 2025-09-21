@@ -28,58 +28,58 @@ const COLORS = {
   veryLightGray: '#f5f5f5'
 };
 
-// Slovak/Hungarian translations - FIXED ENCODING
+// Slovak translations only
 const TRANSLATIONS = {
   // Invoice header
-  invoice: { sk: 'FAKTÚRA', hu: 'SZÁMLA' },
-  taxInvoice: { sk: 'Daňový doklad', hu: 'Adóbizonylat' },
+  invoice: 'FAKTÚRA',
+  taxInvoice: 'Daňový doklad',
   
   // Company info
-  supplier: { sk: 'Dodávateľ', hu: 'Szállító' },
-  customer: { sk: 'Odberateľ', hu: 'Vevő' },
+  supplier: 'Dodávateľ',
+  customer: 'Odberateľ',
   
   // Order details
-  orderNumber: { sk: 'Číslo objednávky', hu: 'Rendelés száma' },
-  orderType: { sk: 'Typ objednávky', hu: 'Rendelés típusa' },
-  delivery: { sk: 'Doručenie', hu: 'Szállítás' },
-  pickup: { sk: 'Vyzdvihnutie', hu: 'Átvétel' },
+  orderNumber: 'Číslo objednávky',
+  orderType: 'Typ objednávky',
+  delivery: 'Doručenie',
+  pickup: 'Vyzdvihnutie',
   
   // Dates
-  issueDate: { sk: 'Dátum vystavenia', hu: 'Kiállítás dátuma' },
-  dueDate: { sk: 'Dátum splatnosti', hu: 'Esedékesség dátuma' },
+  issueDate: 'Dátum vystavenia',
+  dueDate: 'Dátum splatnosti',
   
   // Table headers
-  item: { sk: 'Položka', hu: 'Tétel' },
-  quantity: { sk: 'Množstvo', hu: 'Mennyiség' },
-  unitPrice: { sk: 'Jednotková cena', hu: 'Egységár' },
-  total: { sk: 'Celkom', hu: 'Összesen' },
+  item: 'Položka',
+  quantity: 'Množstvo',
+  unitPrice: 'Jednotková cena',
+  total: 'Celkom',
   
   // Totals
-  subtotal: { sk: 'Medzisúčet', hu: 'Részösszeg' },
-  deliveryFee: { sk: 'Poplatok za doručenie', hu: 'Szállítási díj' },
-  vatBase: { sk: 'Základ DPH 19%', hu: 'ÁFA alap 19%' },
-  vatAmount: { sk: 'DPH 19%', hu: 'ÁFA 19%' },
-  totalAmount: { sk: 'Celková suma', hu: 'Végösszeg' },
+  subtotal: 'Medzisúčet',
+  deliveryFee: 'Poplatok za doručenie',
+  vatBase: 'Základ DPH 19%',
+  vatAmount: 'DPH 19%',
+  totalAmount: 'Celková suma',
   
   // Payment
-  paymentMethod: { sk: 'Spôsob platby', hu: 'Fizetési mód' },
-  cash: { sk: 'Hotovosť', hu: 'Készpénz' },
-  card: { sk: 'Karta', hu: 'Kártya' },
-  online: { sk: 'Online platba', hu: 'Online fizetés' },
-  paid: { sk: 'Uhradené', hu: 'Kifizetve' },
+  paymentMethod: 'Spôsob platby',
+  cash: 'Hotovosť',
+  card: 'Karta',
+  online: 'Online platba',
+  paid: 'Uhradené',
   
   // Menu items (add more as needed)
   menuItems: {
-    'palace-burger': { sk: 'Palace Burger', hu: 'Palace Burger' },
-    'cheeseburger': { sk: 'Cheeseburger', hu: 'Sajtos Burger' },
-    'chicken-burger': { sk: 'Kuracie burger', hu: 'Csirke Burger' },
-    'fanta': { sk: 'Fanta', hu: 'Fanta' },
-    'coca-cola': { sk: 'Coca-Cola', hu: 'Coca-Cola' },
-    'sprite': { sk: 'Sprite', hu: 'Sprite' },
-    'beer': { sk: 'Pivo', hu: 'Sör' },
-    'fries': { sk: 'Hranolky', hu: 'Sült krumpli' },
-    'extra-cheese': { sk: 'Extra syr', hu: 'Extra sajt' },
-    'bacon': { sk: 'Slanina', hu: 'Szalonna' }
+    'palace-burger': 'Palace Burger',
+    'cheeseburger': 'Cheeseburger',
+    'chicken-burger': 'Kuracie burger',
+    'fanta': 'Fanta',
+    'coca-cola': 'Coca-Cola',
+    'sprite': 'Sprite',
+    'beer': 'Pivo',
+    'fries': 'Hranolky',
+    'extra-cheese': 'Extra syr',
+    'bacon': 'Slanina'
   }
 };
 
@@ -157,11 +157,11 @@ function formatDate(date) {
 }
 
 /**
- * Translate menu item name
+ * Translate menu item name (simplified for Slovak only)
  */
-function translateMenuItem(slug, language = 'sk') {
+function translateMenuItem(slug) {
   if (TRANSLATIONS.menuItems[slug]) {
-    return TRANSLATIONS.menuItems[slug][language];
+    return TRANSLATIONS.menuItems[slug];
   }
   // Fallback to original name if no translation found
   return slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
@@ -234,12 +234,12 @@ function drawHeader(doc) {
   // Invoice title
   doc.fontSize(20)
      .fillColor(COLORS.eucalyptusGreen)
-     .text('FAKTÚRA / SZÁMLA', 350, 50, { align: 'right' });
+     .text(TRANSLATIONS.invoice, 350, 50, { align: 'right' });
   
   // Tax invoice subtitle
   doc.fontSize(10)
      .fillColor(COLORS.lightGray)
-     .text('Daňový doklad / Adóbizonylat', 350, 75, { align: 'right' });
+     .text(TRANSLATIONS.taxInvoice, 350, 75, { align: 'right' });
   
   // Line separator
   doc.strokeColor(COLORS.eucalyptusGreen)
@@ -258,7 +258,7 @@ function drawInvoiceInfo(doc, invoiceData) {
   // Invoice number
   doc.fontSize(12)
      .fillColor(COLORS.darkGray)
-     .text('Číslo faktúry / Számla száma:', 350, y)
+     .text('Číslo faktúry:', 350, y)
      .font('Helvetica-Bold')
      .fillColor(COLORS.rusticRed)
      .text(invoiceData.invoiceNumber, 350, y + 15);
@@ -268,14 +268,14 @@ function drawInvoiceInfo(doc, invoiceData) {
   doc.font('Helvetica')
      .fillColor(COLORS.darkGray)
      .fontSize(10)
-     .text('Dátum vystavenia / Kiállítás dátuma:', 350, y)
+     .text(TRANSLATIONS.issueDate + ':', 350, y)
      .text(formatDate(invoiceData.createdAt), 350, y + 12)
-     .text('Dátum splatnosti / Esedékesség:', 350, y + 30)
+     .text(TRANSLATIONS.dueDate + ':', 350, y + 30)
      .text(formatDate(invoiceData.createdAt), 350, y + 42);
   
   // Order info
   y += 70;
-  doc.text('Číslo objednávky / Rendelés száma:', 350, y)
+  doc.text(TRANSLATIONS.orderNumber + ':', 350, y)
      .font('Helvetica-Bold')
      .text(`#${invoiceData.order?.orderNumber || 'N/A'}`, 350, y + 12);
 }
@@ -289,7 +289,7 @@ function drawCompanyInfo(doc) {
   doc.fontSize(12)
      .font('Helvetica-Bold')
      .fillColor(COLORS.eucalyptusGreen)
-     .text('Dodávateľ / Szállító', 50, y);
+     .text(TRANSLATIONS.supplier, 50, y);
   
   y += 20;
   doc.font('Helvetica')
@@ -312,13 +312,13 @@ function drawCustomerInfo(doc, invoiceData) {
   doc.fontSize(12)
      .font('Helvetica-Bold')
      .fillColor(COLORS.eucalyptusGreen)
-     .text('Odberateľ / Vevő', 50, y);
+     .text(TRANSLATIONS.customer, 50, y);
   
   y += 20;
   doc.font('Helvetica')
      .fillColor(COLORS.darkGray)
      .fontSize(10)
-     .text(invoiceData.customerName || 'Zákazník / Vásárló', 50, y);
+     .text(invoiceData.customerName || 'Zákazník', 50, y);
   
   if (invoiceData.customerPhone) {
     doc.text(`Tel: ${invoiceData.customerPhone}`, 50, y + 12);
@@ -347,10 +347,10 @@ function drawItemsTable(doc, invoiceData) {
   
   // Header text
   doc.fillColor(COLORS.darkGray)
-     .text('Položka / Tétel', 55, y + 6)
-     .text('Mn. / Mny.', 300, y + 6)
-     .text('Jedn. cena / Egységár', 350, y + 6)
-     .text('Spolu / Összesen', 470, y + 6);
+     .text(TRANSLATIONS.item, 55, y + 6)
+     .text('Mn.', 300, y + 6)
+     .text('Jedn. cena', 350, y + 6)
+     .text('Spolu', 470, y + 6);
   
   y += 25;
   
@@ -370,9 +370,7 @@ function drawItemsTable(doc, invoiceData) {
     
     // If we have slug, try to translate
     if (item.slug) {
-      const itemNameSk = translateMenuItem(item.slug, 'sk');
-      const itemNameHu = translateMenuItem(item.slug, 'hu');
-      displayName = `${itemNameSk} / ${itemNameHu}`;
+      displayName = translateMenuItem(item.slug);
     }
     
     // Item row
@@ -429,24 +427,24 @@ function drawTotals(doc, invoiceData, startY) {
   // Subtotal
   doc.fontSize(10)
      .fillColor(COLORS.darkGray)
-     .text('Medzisúčet / Részösszeg:', 310, y)
+     .text(TRANSLATIONS.subtotal + ':', 310, y)
      .text(formatCurrency(invoiceData.subtotal || breakdown.netAmount), 480, y, { align: 'right' });
   
   // Delivery fee (if applicable)
   if (invoiceData.deliveryFee && invoiceData.deliveryFee > 0) {
     y += 15;
-    doc.text('Poplatok za doručenie / Szállítási díj:', 310, y)
+    doc.text(TRANSLATIONS.deliveryFee + ':', 310, y)
        .text(formatCurrency(invoiceData.deliveryFee), 480, y, { align: 'right' });
   }
   
   // VAT base
   y += 15;
-  doc.text('Základ DPH 19% / ÁFA alap 19%:', 310, y)
+  doc.text(TRANSLATIONS.vatBase + ':', 310, y)
      .text(formatCurrency(breakdown.netAmount), 480, y, { align: 'right' });
   
   // VAT amount
   y += 15;
-  doc.text('DPH 19% / ÁFA 19%:', 310, y)
+  doc.text(TRANSLATIONS.vatAmount + ':', 310, y)
      .text(formatCurrency(breakdown.vatAmount), 480, y, { align: 'right' });
   
   // Total line
@@ -462,7 +460,7 @@ function drawTotals(doc, invoiceData, startY) {
   doc.fontSize(12)
      .font('Helvetica-Bold')
      .fillColor(COLORS.rusticRed)
-     .text('CELKOM / VÉGÖSSZEG:', 310, y)
+     .text('CELKOM:', 310, y)
      .text(formatCurrency(invoiceData.totalGross), 480, y, { align: 'right' });
 }
 
@@ -474,15 +472,15 @@ function drawFooter(doc, invoiceData) {
   
   // Payment method
   const paymentMethods = {
-    'CASH': 'Hotovosť / Készpénz',
-    'CARD': 'Karta / Kártya',
-    'ONLINE': 'Online platba / Online fizetés'
+    'CASH': TRANSLATIONS.cash,
+    'CARD': TRANSLATIONS.card,
+    'ONLINE': TRANSLATIONS.online
   };
   
   doc.fontSize(10)
      .font('Helvetica-Bold')
      .fillColor(COLORS.eucalyptusGreen)
-     .text('Spôsob platby / Fizetési mód:', 50, y);
+     .text(TRANSLATIONS.paymentMethod + ':', 50, y);
   
   doc.font('Helvetica')
      .fillColor(COLORS.darkGray)
@@ -492,13 +490,13 @@ function drawFooter(doc, invoiceData) {
   y += 15;
   doc.font('Helvetica-Bold')
      .fillColor(COLORS.rusticRed)
-     .text('UHRADENÉ / KIFIZETVE', 50, y);
+     .text(TRANSLATIONS.paid.toUpperCase(), 50, y);
   
   // Footer note
   y += 40;
   doc.fontSize(8)
      .fillColor(COLORS.lightGray)
-     .text('Ďakujeme za vašu návštevu! / Köszönjük a látogatást!', 50, y)
+     .text('Ďakujeme za vašu návštevu!', 50, y)
      .text('Palace Cafe & Street Food - Autentické chute od 2016', 50, y + 12);
 }
 
