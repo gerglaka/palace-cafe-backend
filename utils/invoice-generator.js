@@ -129,8 +129,8 @@ async function getNextInvoiceCounter(paymentMethod, year, prisma) {
  */
 function calculateVATBreakdown(grossAmount) {
   const vatRate = 0.19; // 19%
-  const netAmount = Math.round(grossAmount / (1 + vatRate) * 100) / 100;
   const vatAmount = Math.round(grossAmount * vatRate * 100) / 100;
+  const netAmount = Math.round((grossAmount - vatAmount) * 100) / 100;
   
   return {
     netAmount,
