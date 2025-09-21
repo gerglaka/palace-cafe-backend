@@ -1,16 +1,13 @@
 /**
- * Palace Cafe & Street Food - Invoice Generator (FIXED UTF-8)
- * Professional invoice generation with Slovak legal compliance
- * Bilingual support (Slovak/Hungarian) with proper character encoding
- * 19% DPH calculation and casual business formatting
+ * Palace Cafe & Street Food - NEW Invoice Generator
+ * Clean implementation with Puppeteer (HTML to PDF)
+ * Uses your exact VAT calculation: VAT = GROSS * 0.19, NET = GROSS - VAT
+ * Slovak language only, proper UTF-8 support
  */
 
-const PDFDocument = require('pdfkit');
-const fs = require('fs');
-const path = require('path');
+const puppeteer = require('puppeteer');
 
-
-// Company details - FIXED ENCODING
+// Company details
 const COMPANY_INFO = {
   name: 'Palace Cafe & Street Food s.r.o.',
   address: 'Hradná 168/2',
@@ -29,60 +26,21 @@ const COLORS = {
   veryLightGray: '#f5f5f5'
 };
 
-// Slovak/Hungarian translations - FIXED ENCODING
-const TRANSLATIONS = {
-  // Invoice header
-  invoice: { sk: 'FAKTÚRA', hu: 'SZÁMLA' },
-  taxInvoice: { sk: 'Daňový doklad', hu: 'Adóbizonylat' },
+/**
+ * Calculate VAT breakdown using YOUR METHOD
+ * GROSS = x, VAT = x * 0.19, NET = GROSS - VAT
+ */
+function calculateVATBreakdown(grossAmount) {
+  const vatRate = 0.19; // 19%
+  const vatAmount = Math.round(grossAmount * vatRate * 100) / 100;
+  const netAmount = Math.round((grossAmount - vatAmount) * 100) / 100;
   
-  // Company info
-  supplier: { sk: 'Dodávateľ', hu: 'Szállító' },
-  customer: { sk: 'Odberateľ', hu: 'Vevő' },
-  
-  // Order details
-  orderNumber: { sk: 'Číslo objednávky', hu: 'Rendelés száma' },
-  orderType: { sk: 'Typ objednávky', hu: 'Rendelés típusa' },
-  delivery: { sk: 'Doručenie', hu: 'Szállítás' },
-  pickup: { sk: 'Vyzdvihnutie', hu: 'Átvétel' },
-  
-  // Dates
-  issueDate: { sk: 'Dátum vystavenia', hu: 'Kiállítás dátuma' },
-  dueDate: { sk: 'Dátum splatnosti', hu: 'Esedékesség dátuma' },
-  
-  // Table headers
-  item: { sk: 'Položka', hu: 'Tétel' },
-  quantity: { sk: 'Množstvo', hu: 'Mennyiség' },
-  unitPrice: { sk: 'Jednotková cena', hu: 'Egységár' },
-  total: { sk: 'Celkom', hu: 'Összesen' },
-  
-  // Totals
-  subtotal: { sk: 'Medzisúčet', hu: 'Részösszeg' },
-  deliveryFee: { sk: 'Poplatok za doručenie', hu: 'Szállítási díj' },
-  vatBase: { sk: 'Základ DPH 19%', hu: 'ÁFA alap 19%' },
-  vatAmount: { sk: 'DPH 19%', hu: 'ÁFA 19%' },
-  totalAmount: { sk: 'Celková suma', hu: 'Végösszeg' },
-  
-  // Payment
-  paymentMethod: { sk: 'Spôsob platby', hu: 'Fizetési mód' },
-  cash: { sk: 'Hotovosť', hu: 'Készpénz' },
-  card: { sk: 'Karta', hu: 'Kártya' },
-  online: { sk: 'Online platba', hu: 'Online fizetés' },
-  paid: { sk: 'Uhradené', hu: 'Kifizetve' },
-  
-  // Menu items (add more as needed)
-  menuItems: {
-    'palace-burger': { sk: 'Palace Burger', hu: 'Palace Burger' },
-    'cheeseburger': { sk: 'Cheeseburger', hu: 'Sajtos Burger' },
-    'chicken-burger': { sk: 'Kuracie burger', hu: 'Csirke Burger' },
-    'fanta': { sk: 'Fanta', hu: 'Fanta' },
-    'coca-cola': { sk: 'Coca-Cola', hu: 'Coca-Cola' },
-    'sprite': { sk: 'Sprite', hu: 'Sprite' },
-    'beer': { sk: 'Pivo', hu: 'Sör' },
-    'fries': { sk: 'Hranolky', hu: 'Sült krumpli' },
-    'extra-cheese': { sk: 'Extra syr', hu: 'Extra sajt' },
-    'bacon': { sk: 'Slanina', hu: 'Szalonna' }
-  }
-};
+  return {
+    netAmount,
+    vatAmount,
+    grossAmount: Math.round(grossAmount * 100) / 100
+  };
+}
 
 /**
  * Generate invoice number based on payment method and year
@@ -124,22 +82,6 @@ async function getNextInvoiceCounter(paymentMethod, year, prisma) {
 }
 
 /**
- * Calculate VAT breakdown (19% Slovak rate)
- * Corrected: net = gross / 1.19, vat = gross * 0.19
- */
-function calculateVATBreakdown(grossAmount) {
-  const vatRate = 0.19; // 19%
-  const vatAmount = Math.round(grossAmount * vatRate * 100) / 100;
-  const netAmount = Math.round((grossAmount - vatAmount) * 100) / 100;
-  
-  return {
-    netAmount,
-    vatAmount,
-    grossAmount: Math.round(grossAmount * 100) / 100
-  };
-}
-
-/**
  * Format currency for display
  */
 function formatCurrency(amount) {
@@ -158,402 +100,379 @@ function formatDate(date) {
 }
 
 /**
- * Translate menu item name
+ * Generate HTML template for invoice
  */
-function translateMenuItem(slug, language = 'sk') {
-  if (TRANSLATIONS.menuItems[slug]) {
-    return TRANSLATIONS.menuItems[slug][language];
-  }
-  // Fallback to original name if no translation found
-  return slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-}
-
-function testPDFText() {
-  const testStrings = [
-    'FAKTÚRA',
-    'Daňový doklad', 
-    'Dodávateľ',
-    'Test ľščťžýáí'
-  ];
+function generateInvoiceHTML(invoiceData) {
+  const vatBreakdown = calculateVATBreakdown(invoiceData.totalGross);
   
-  testStrings.forEach(str => {
-    console.log(`Original: ${str}`);
-    console.log(`Bytes: ${Buffer.from(str, 'utf8')}`);
-    console.log(`Length: ${str.length}`);
-    console.log('---');
-  });
-}
-
-/**
- * Generate invoice PDF with proper UTF-8 encoding
- */
-function generateInvoicePDF(invoiceData) {
-  return new Promise((resolve, reject) => {
-    try {
-
-      console.log('🔍 DEBUG - Invoice data received:');
-      console.log('Customer name:', invoiceData.customerName);
-      console.log('Invoice number:', invoiceData.invoiceNumber);
-      console.log('Order items:', JSON.stringify(invoiceData.orderItems, null, 2));
-      
-      // Check for encoding issues in customer data
-      if (invoiceData.customerName) {
-        console.log('Customer name bytes:', Buffer.from(invoiceData.customerName, 'utf8'));
-      }
-
-      // Create PDF with proper font support for Unicode characters
-      const doc = new PDFDocument({ 
-        size: 'A4', 
-        margin: 50,
-        bufferPages: true,
-        compress: false,
-        info: {
-          Title: `Faktúra ${invoiceData.invoiceNumber}`,
-          Subject: 'Palace Cafe & Street Food - Faktúra',
-          Author: COMPANY_INFO.name
-        }
-      });
-
-      doc.font('Helvetica');
-
-      // Register Unicode-supporting fonts (download DejaVuSans from https://dejavu-fonts.github.io/Download.html and place in a 'fonts' directory relative to this script)
-      let defaultFont = 'Helvetica';
-      let boldFont = 'Helvetica-Bold';
-      try {
-        const fontPath = path.join(__dirname, 'fonts/DejaVuSans.ttf');
-        const boldFontPath = path.join(__dirname, 'fonts/DejaVuSans-Bold.ttf');
-        if (fs.existsSync(fontPath) && fs.existsSync(boldFontPath)) {
-          doc.registerFont('DejaVu', fontPath);
-          doc.registerFont('DejaVu-Bold', boldFontPath);
-          defaultFont = 'DejaVu';
-          boldFont = 'DejaVu-Bold';
-        }
-      } catch (fontError) {
-        console.warn('Custom fonts not found, falling back to built-in fonts (may have limited Unicode support)');
-      }
-
-      // Set default font
-      doc.font(defaultFont);
-
-      const buffers = [];
-      doc.on('data', buffers.push.bind(buffers));
-      doc.on('end', () => {
-        const pdfData = Buffer.concat(buffers);
-        resolve(pdfData);
-      });
-      
-      // Header
-      drawHeader(doc, defaultFont, boldFont);
-      
-      // Invoice info
-      drawInvoiceInfo(doc, invoiceData, defaultFont, boldFont);
-      
-      // Company and customer info
-      drawCompanyInfo(doc, defaultFont, boldFont);
-      drawCustomerInfo(doc, invoiceData, defaultFont, boldFont);
-      
-      // Items table
-      const tableEndY = drawItemsTable(doc, invoiceData, defaultFont, boldFont);
-      
-      // Totals
-      drawTotals(doc, invoiceData, tableEndY, defaultFont, boldFont);
-      
-      // Footer
-      drawFooter(doc, invoiceData, defaultFont, boldFont);
-      
-      doc.end();
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-
-/**
- * Draw PDF header
- */
-function drawHeader(doc, defaultFont, boldFont) {
-  // Company name in brand color
-  doc.fontSize(24)
-     .fillColor(COLORS.rusticRed)
-     .font(defaultFont)
-     .text(COMPANY_INFO.name, 50, 50);
-  
-  // Invoice title
-  doc.fontSize(20)
-     .fillColor(COLORS.eucalyptusGreen)
-     .font(defaultFont)
-     .text('FAKTÚRA / SZÁMLA', 350, 50, { align: 'right' });
-  
-  // Tax invoice subtitle
-  doc.fontSize(10)
-     .fillColor(COLORS.lightGray)
-     .font(defaultFont)
-     .text('Daňový doklad / Adóbizonylat', 350, 75, { align: 'right' });
-  
-  // Line separator
-  doc.strokeColor(COLORS.eucalyptusGreen)
-     .lineWidth(2)
-     .moveTo(50, 100)
-     .lineTo(545, 100)
-     .stroke();
-}
-
-/**
- * Draw invoice information
- */
-function drawInvoiceInfo(doc, invoiceData, defaultFont, boldFont) {
-  let y = 120;
-  
-  // Invoice number
-  doc.fontSize(12)
-     .fillColor(COLORS.darkGray)
-     .font(defaultFont)
-     .text('Číslo faktúry / Számla száma:', 350, y)
-     .font(boldFont)
-     .fillColor(COLORS.rusticRed)
-     .text(invoiceData.invoiceNumber, 350, y + 15);
-  
-  // Dates
-  y += 40;
-  doc.font(defaultFont)
-     .fillColor(COLORS.darkGray)
-     .fontSize(10)
-     .text('Dátum vystavenia / Kiállítás dátuma:', 350, y)
-     .text(formatDate(invoiceData.createdAt), 350, y + 12)
-     .text('Dátum splatnosti / Esedékesség:', 350, y + 30)
-     .text(formatDate(invoiceData.createdAt), 350, y + 42);
-  
-  // Order info
-  y += 70;
-  doc.font(defaultFont)
-     .text('Číslo objednávky / Rendelés száma:', 350, y)
-     .font(boldFont)
-     .text(`#${invoiceData.order?.orderNumber || 'N/A'}`, 350, y + 12);
-}
-
-/**
- * Draw company information
- */
-function drawCompanyInfo(doc, defaultFont, boldFont) {
-  let y = 120;
-  
-  doc.fontSize(12)
-     .font(boldFont)
-     .fillColor(COLORS.eucalyptusGreen)
-     .text('Dodávateľ / Szállító', 50, y);
-  
-  y += 20;
-  doc.font(defaultFont)
-     .fillColor(COLORS.darkGray)
-     .fontSize(10)
-     .text(COMPANY_INFO.name, 50, y)
-     .text(COMPANY_INFO.address, 50, y + 12)
-     .text(COMPANY_INFO.city, 50, y + 24)
-     .text(`IČO: ${COMPANY_INFO.ico}`, 50, y + 40)
-     .text(`DIČ: ${COMPANY_INFO.dic}`, 50, y + 52)
-     .text(`IČ DPH: ${COMPANY_INFO.vatNumber}`, 50, y + 64);
-}
-
-/**
- * Draw customer information
- */
-function drawCustomerInfo(doc, invoiceData, defaultFont, boldFont) {
-  let y = 220;
-  
-  doc.fontSize(12)
-     .font(boldFont)
-     .fillColor(COLORS.eucalyptusGreen)
-     .text('Odberateľ / Vevő', 50, y);
-  
-  y += 20;
-  doc.font(defaultFont)
-     .fillColor(COLORS.darkGray)
-     .fontSize(10)
-     .text(invoiceData.customerName || 'Zákazník / Vásárló', 50, y);
-  
-  if (invoiceData.customerPhone) {
-    doc.text(`Tel: ${invoiceData.customerPhone}`, 50, y + 12);
-    y += 12;
-  }
-  
-  if (invoiceData.customerEmail) {
-    doc.text(`Email: ${invoiceData.customerEmail}`, 50, y + 12);
-  }
-}
-
-/**
- * Draw items table
- */
-function drawItemsTable(doc, invoiceData, defaultFont, boldFont) {
-  let y = 300;
-  
-  // Table headers
-  doc.fontSize(10)
-     .font(boldFont)
-     .fillColor(COLORS.darkGray);
-  
-  // Header background
-  doc.rect(50, y, 495, 20)
-     .fill(COLORS.veryLightGray);
-  
-  // Header text
-  doc.fillColor(COLORS.darkGray)
-     .font(defaultFont)
-     .text('Položka / Tétel', 55, y + 6)
-     .text('Mn. / Mny.', 300, y + 6)
-     .text('Jedn. cena / Egységár', 350, y + 6)
-     .text('Spolu / Összesen', 470, y + 6);
-  
-  y += 25;
-  
-  // Items
-  doc.font(defaultFont).fontSize(9);
-  
-  const items = invoiceData.orderItems || [];
-  
-  items.forEach((item, index) => {
-    if (y > 700) { // New page if needed
-      doc.addPage();
-      y = 50;
-    }
-    
-    // Handle different item name formats
-    let displayName = item.name || 'Unknown Item';
-    
-    // If we have slug, try to translate
-    if (item.slug) {
-      const itemNameSk = translateMenuItem(item.slug, 'sk');
-      const itemNameHu = translateMenuItem(item.slug, 'hu');
-      displayName = `${itemNameSk} / ${itemNameHu}`;
-    }
-    
-    // Item row
-    doc.fillColor(COLORS.darkGray)
-       .text(displayName, 55, y, { width: 240 })
-       .text((item.quantity || 1).toString(), 300, y)
-       .text(formatCurrency(item.unitPrice || item.price || 0), 350, y)
-       .text(formatCurrency(item.totalPrice || 0), 470, y);
-    
-    // Customizations (if any)
-    if (item.customizations) {
-      y += 12;
-      doc.fontSize(8)
-         .fillColor(COLORS.lightGray)
-         .text(`• ${item.customizations}`, 60, y);
-    }
-    
-    y += 20;
-    
-    // Line separator
-    if (index < items.length - 1) {
-      doc.strokeColor('#eeeeee')
-         .lineWidth(0.5)
-         .moveTo(55, y - 5)
-         .lineTo(540, y - 5)
-         .stroke();
-    }
-  });
-  
-  // Table bottom border
-  doc.strokeColor(COLORS.eucalyptusGreen)
-     .lineWidth(1)
-     .moveTo(50, y)
-     .lineTo(545, y)
-     .stroke();
-  
-  return y + 20;
-}
-
-/**
- * Draw totals section
- */
-function drawTotals(doc, invoiceData, startY, defaultFont, boldFont) {
-  let y = Math.max(startY, 500);
-  
-  const breakdown = calculateVATBreakdown(invoiceData.totalGross);
-  
-  // Totals box
-  doc.rect(300, y, 245, 120)
-     .stroke(COLORS.lightGray);
-  
-  y += 15;
-  
-  // Subtotal
-  doc.fontSize(10)
-     .fillColor(COLORS.darkGray)
-     .font(defaultFont)
-     .text('Medzisúčet / Részösszeg:', 310, y)
-     .text(formatCurrency(invoiceData.subtotal || breakdown.netAmount), 480, y, { align: 'right' });
-  
-  // Delivery fee (if applicable)
-  if (invoiceData.deliveryFee && invoiceData.deliveryFee > 0) {
-    y += 15;
-    doc.text('Poplatok za doručenie / Szállítási díj:', 310, y)
-       .text(formatCurrency(invoiceData.deliveryFee), 480, y, { align: 'right' });
-  }
-  
-  // VAT base
-  y += 15;
-  doc.text('Základ DPH 19% / ÁFA alap 19%:', 310, y)
-     .text(formatCurrency(breakdown.netAmount), 480, y, { align: 'right' });
-  
-  // VAT amount
-  y += 15;
-  doc.text('DPH 19% / ÁFA 19%:', 310, y)
-     .text(formatCurrency(breakdown.vatAmount), 480, y, { align: 'right' });
-  
-  // Total line
-  y += 20;
-  doc.strokeColor(COLORS.eucalyptusGreen)
-     .lineWidth(1)
-     .moveTo(310, y)
-     .lineTo(535, y)
-     .stroke();
-  
-  // Final total
-  y += 10;
-  doc.fontSize(12)
-     .font(boldFont)
-     .fillColor(COLORS.rusticRed)
-     .text('CELKOM / VÉGÖSSZEG:', 310, y)
-     .text(formatCurrency(invoiceData.totalGross), 480, y, { align: 'right' });
-}
-
-/**
- * Draw footer with payment info
- */
-function drawFooter(doc, invoiceData, defaultFont, boldFont) {
-  let y = 650;
-  
-  // Payment method
+  // Payment method translations
   const paymentMethods = {
-    'CASH': 'Hotovosť / Készpénz',
-    'CARD': 'Karta / Kártya',
-    'ONLINE': 'Online platba / Online fizetés'
+    'CASH': 'Hotovosť',
+    'CARD': 'Karta',
+    'ONLINE': 'Online platba'
   };
+
+  return `
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Faktúra ${invoiceData.invoiceNumber}</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', Arial, sans-serif;
+            font-size: 12px;
+            line-height: 1.4;
+            color: ${COLORS.darkGray};
+            background: white;
+        }
+        
+        .invoice-container {
+            max-width: 210mm;
+            margin: 0 auto;
+            padding: 20mm;
+            background: white;
+        }
+        
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 30px;
+            border-bottom: 3px solid ${COLORS.eucalyptusGreen};
+            padding-bottom: 20px;
+        }
+        
+        .company-name {
+            font-size: 24px;
+            font-weight: 700;
+            color: ${COLORS.rusticRed};
+            margin-bottom: 5px;
+        }
+        
+        .invoice-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: ${COLORS.eucalyptusGreen};
+            text-align: right;
+        }
+        
+        .invoice-subtitle {
+            font-size: 10px;
+            color: ${COLORS.lightGray};
+            text-align: right;
+            margin-top: 5px;
+        }
+        
+        .info-section {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+        }
+        
+        .info-block {
+            width: 48%;
+        }
+        
+        .info-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: ${COLORS.eucalyptusGreen};
+            margin-bottom: 10px;
+        }
+        
+        .info-content {
+            font-size: 11px;
+            line-height: 1.5;
+        }
+        
+        .invoice-details {
+            background: ${COLORS.veryLightGray};
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        
+        .invoice-number {
+            font-size: 16px;
+            font-weight: 700;
+            color: ${COLORS.rusticRed};
+            margin-bottom: 10px;
+        }
+        
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        
+        .items-table th {
+            background: ${COLORS.eucalyptusGreen};
+            color: white;
+            padding: 12px 8px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 11px;
+        }
+        
+        .items-table td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #eee;
+            font-size: 11px;
+        }
+        
+        .items-table tr:nth-child(even) {
+            background: #fafafa;
+        }
+        
+        .customizations {
+            font-size: 9px;
+            color: ${COLORS.lightGray};
+            font-style: italic;
+            margin-top: 3px;
+        }
+        
+        .totals-section {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 30px;
+        }
+        
+        .totals-box {
+            width: 300px;
+            border: 2px solid ${COLORS.lightGray};
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        
+        .totals-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 15px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .totals-row.final {
+            background: ${COLORS.eucalyptusGreen};
+            color: white;
+            font-weight: 700;
+            font-size: 14px;
+            border-bottom: none;
+        }
+        
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+        
+        .payment-info {
+            margin-bottom: 15px;
+        }
+        
+        .payment-method {
+            font-weight: 600;
+            color: ${COLORS.eucalyptusGreen};
+        }
+        
+        .payment-status {
+            font-weight: 700;
+            color: ${COLORS.rusticRed};
+            font-size: 14px;
+            margin: 10px 0;
+        }
+        
+        .footer-note {
+            font-size: 10px;
+            color: ${COLORS.lightGray};
+            text-align: center;
+            margin-top: 20px;
+        }
+        
+        @media print {
+            .invoice-container {
+                margin: 0;
+                padding: 15mm;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="invoice-container">
+        <!-- Header -->
+        <div class="header">
+            <div>
+                <div class="company-name">${COMPANY_INFO.name}</div>
+            </div>
+            <div>
+                <div class="invoice-title">FAKTÚRA</div>
+                <div class="invoice-subtitle">Daňový doklad</div>
+            </div>
+        </div>
+        
+        <!-- Invoice Details -->
+        <div class="invoice-details">
+            <div class="invoice-number">Číslo faktúry: ${invoiceData.invoiceNumber}</div>
+            <div><strong>Dátum vystavenia:</strong> ${formatDate(invoiceData.createdAt)}</div>
+            <div><strong>Dátum splatnosti:</strong> ${formatDate(invoiceData.createdAt)}</div>
+            <div><strong>Číslo objednávky:</strong> #${invoiceData.order?.orderNumber || 'N/A'}</div>
+        </div>
+        
+        <!-- Company and Customer Info -->
+        <div class="info-section">
+            <div class="info-block">
+                <div class="info-title">Dodávateľ</div>
+                <div class="info-content">
+                    <strong>${COMPANY_INFO.name}</strong><br>
+                    ${COMPANY_INFO.address}<br>
+                    ${COMPANY_INFO.city}<br><br>
+                    <strong>IČO:</strong> ${COMPANY_INFO.ico}<br>
+                    <strong>DIČ:</strong> ${COMPANY_INFO.dic}<br>
+                    <strong>IČ DPH:</strong> ${COMPANY_INFO.vatNumber}
+                </div>
+            </div>
+            
+            <div class="info-block">
+                <div class="info-title">Odberateľ</div>
+                <div class="info-content">
+                    <strong>${invoiceData.customerName || 'Zákazník'}</strong><br>
+                    ${invoiceData.customerPhone ? `Tel: ${invoiceData.customerPhone}<br>` : ''}
+                    ${invoiceData.customerEmail ? `Email: ${invoiceData.customerEmail}<br>` : ''}
+                </div>
+            </div>
+        </div>
+        
+        <!-- Items Table -->
+        <table class="items-table">
+            <thead>
+                <tr>
+                    <th style="width: 50%">Položka</th>
+                    <th style="width: 10%">Mn.</th>
+                    <th style="width: 20%">Jedn. cena</th>
+                    <th style="width: 20%">Spolu</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${(invoiceData.orderItems || []).map(item => `
+                    <tr>
+                        <td>
+                            <strong>${item.name || 'Unknown Item'}</strong>
+                            ${item.customizations ? `<div class="customizations">• ${item.customizations}</div>` : ''}
+                        </td>
+                        <td>${item.quantity || 1}</td>
+                        <td>${formatCurrency(item.unitPrice || item.price || 0)}</td>
+                        <td>${formatCurrency(item.totalPrice || 0)}</td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+        
+        <!-- Totals -->
+        <div class="totals-section">
+            <div class="totals-box">
+                <div class="totals-row">
+                    <span>Medzisúčet:</span>
+                    <span>${formatCurrency(invoiceData.subtotal || vatBreakdown.netAmount)}</span>
+                </div>
+                ${invoiceData.deliveryFee && invoiceData.deliveryFee > 0 ? `
+                <div class="totals-row">
+                    <span>Poplatok za doručenie:</span>
+                    <span>${formatCurrency(invoiceData.deliveryFee)}</span>
+                </div>
+                ` : ''}
+                <div class="totals-row">
+                    <span>Základ DPH 19%:</span>
+                    <span>${formatCurrency(vatBreakdown.netAmount)}</span>
+                </div>
+                <div class="totals-row">
+                    <span>DPH 19%:</span>
+                    <span>${formatCurrency(vatBreakdown.vatAmount)}</span>
+                </div>
+                <div class="totals-row final">
+                    <span>CELKOM:</span>
+                    <span>${formatCurrency(invoiceData.totalGross)}</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+            <div class="payment-info">
+                <strong>Spôsob platby:</strong> 
+                <span class="payment-method">${paymentMethods[invoiceData.paymentMethod] || invoiceData.paymentMethod}</span>
+            </div>
+            
+            <div class="payment-status">UHRADENÉ</div>
+            
+            <div class="footer-note">
+                Ďakujeme za vašu návštevu!<br>
+                Palace Cafe & Street Food - Autentické chute od 2016
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+  `;
+}
+
+/**
+ * Generate invoice PDF using Puppeteer
+ */
+async function generateInvoicePDF(invoiceData) {
+  let browser = null;
   
-  doc.fontSize(10)
-     .font(boldFont)
-     .fillColor(COLORS.eucalyptusGreen)
-     .text('Spôsob platby / Fizetési mód:', 50, y);
-  
-  doc.font(defaultFont)
-     .fillColor(COLORS.darkGray)
-     .text(paymentMethods[invoiceData.paymentMethod] || invoiceData.paymentMethod, 200, y);
-  
-  // Payment status
-  y += 15;
-  doc.font(boldFont)
-     .fillColor(COLORS.rusticRed)
-     .text('UHRADENÉ / KIFIZETVE', 50, y);
-  
-  // Footer note
-  y += 40;
-  doc.fontSize(8)
-     .fillColor(COLORS.lightGray)
-     .font(defaultFont)
-     .text('Ďakujeme za vašu návštevu! / Köszönjük a látogatást!', 50, y)
-     .text('Palace Cafe & Street Food - Autentické chute od 2016', 50, y + 12);
+  try {
+    console.log('🚀 Starting Puppeteer invoice generation...');
+    
+    // Launch browser
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    
+    const page = await browser.newPage();
+    
+    // Generate HTML content
+    const htmlContent = generateInvoiceHTML(invoiceData);
+    
+    // Set HTML content
+    await page.setContent(htmlContent, {
+      waitUntil: 'networkidle0'
+    });
+    
+    // Generate PDF
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      margin: {
+        top: '10mm',
+        right: '10mm',
+        bottom: '10mm',
+        left: '10mm'
+      },
+      printBackground: true,
+      preferCSSPageSize: true
+    });
+    
+    console.log('✅ PDF generated successfully');
+    return pdfBuffer;
+    
+  } catch (error) {
+    console.error('❌ PDF generation failed:', error);
+    throw error;
+  } finally {
+    if (browser) {
+      await browser.close();
+    }
+  }
 }
 
 module.exports = {
@@ -562,6 +481,5 @@ module.exports = {
   getNextInvoiceCounter,
   calculateVATBreakdown,
   formatCurrency,
-  COMPANY_INFO,
-  TRANSLATIONS
+  COMPANY_INFO
 };
