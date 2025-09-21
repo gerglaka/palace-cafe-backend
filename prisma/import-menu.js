@@ -111,7 +111,7 @@ async function main() {
       dic: '2122291578',
       ico: '56384840',
       vatNumber: 'SK2122291578',
-      vatRate: '19'
+      vatRate: 19.0
     }
   });
 
