@@ -6,10 +6,22 @@
  */
 
 const pdfMake = require('pdfmake/build/pdfmake');
-const pdfFonts = require('pdfmake/build/vfs_fonts');
 
-// Set up fonts for PDFmake
-pdfMake.vfs = pdfFonts.pdfMake.vfs;
+// Try different font loading approaches
+try {
+  const pdfFonts = require('pdfmake/build/vfs_fonts');
+  pdfMake.vfs = pdfFonts.pdfMake.vfs;
+} catch (error) {
+  // Fallback font loading for different PDFmake versions
+  try {
+    const vfs_fonts = require('pdfmake/build/vfs_fonts');
+    pdfMake.vfs = vfs_fonts.vfs;
+  } catch (error2) {
+    console.warn('Could not load PDFmake fonts, using default fonts');
+    // Define minimal font structure
+    pdfMake.vfs = {};
+  }
+}
 
 // Company details
 const COMPANY_INFO = {
