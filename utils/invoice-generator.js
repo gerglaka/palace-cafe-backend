@@ -1,15 +1,12 @@
 /**
- * Palace Cafe & Street Food - Invoice Generator (FIXED VERSION)
- * Professional invoice generation with Slovak legal compliance
- * Fixed UTF-8 encoding and your exact VAT calculation method
- * VAT = GROSS * 0.19, NET = GROSS - VAT
+ * Palace Cafe & Street Food - Invoice Generator
+ * Clean Slovak-only implementation with PDFKit
+ * VAT calculation: GROSS = x, VAT = x * 0.19, NET = GROSS - VAT
  */
 
 const PDFDocument = require('pdfkit');
-const fs = require('fs');
-const path = require('path');
 
-// Company details - FIXED ENCODING
+// Company information
 const COMPANY_INFO = {
   name: 'Palace Cafe & Street Food s.r.o.',
   address: 'Hradná 168/2',
@@ -19,72 +16,33 @@ const COMPANY_INFO = {
   vatNumber: 'SK2122291578'
 };
 
-// Brand colors
+// Colors
 const COLORS = {
-  rusticRed: '#38141A',
-  eucalyptusGreen: '#1D665D',
-  darkGray: '#333333',
-  lightGray: '#666666',
-  veryLightGray: '#f5f5f5'
-};
-
-// Slovak translations only
-const TRANSLATIONS = {
-  // Invoice header
-  invoice: 'FAKTÚRA',
-  taxInvoice: 'Daňový doklad',
-  
-  // Company info
-  supplier: 'Dodávateľ',
-  customer: 'Odberateľ',
-  
-  // Order details
-  orderNumber: 'Číslo objednávky',
-  orderType: 'Typ objednávky',
-  delivery: 'Doručenie',
-  pickup: 'Vyzdvihnutie',
-  
-  // Dates
-  issueDate: 'Dátum vystavenia',
-  dueDate: 'Dátum splatnosti',
-  
-  // Table headers
-  item: 'Položka',
-  quantity: 'Množstvo',
-  unitPrice: 'Jednotková cena',
-  total: 'Celkom',
-  
-  // Totals
-  subtotal: 'Medzisúčet',
-  deliveryFee: 'Poplatok za doručenie',
-  vatBase: 'Základ DPH 19%',
-  vatAmount: 'DPH 19%',
-  totalAmount: 'Celková suma',
-  
-  // Payment
-  paymentMethod: 'Spôsob platby',
-  cash: 'Hotovosť',
-  card: 'Karta',
-  online: 'Online platba',
-  paid: 'Uhradené',
-  
-  // Menu items (add more as needed)
-  menuItems: {
-    'palace-burger': 'Palace Burger',
-    'cheeseburger': 'Cheeseburger',
-    'chicken-burger': 'Kuracie burger',
-    'fanta': 'Fanta',
-    'coca-cola': 'Coca-Cola',
-    'sprite': 'Sprite',
-    'beer': 'Pivo',
-    'fries': 'Hranolky',
-    'extra-cheese': 'Extra syr',
-    'bacon': 'Slanina'
-  }
+  primary: '#38141A',    // Rustic red
+  secondary: '#1D665D',  // Eucalyptus green
+  dark: '#333333',
+  light: '#666666',
+  background: '#f5f5f5'
 };
 
 /**
- * Generate invoice number based on payment method and year
+ * Calculate VAT breakdown using exact method
+ * GROSS = x, VAT = x * 0.19, NET = GROSS - VAT
+ */
+function calculateVATBreakdown(grossAmount) {
+  const vatRate = 0.19;
+  const vatAmount = Math.round(grossAmount * vatRate * 100) / 100;
+  const netAmount = Math.round((grossAmount - vatAmount) * 100) / 100;
+  
+  return {
+    netAmount,
+    vatAmount,
+    grossAmount: Math.round(grossAmount * 100) / 100
+  };
+}
+
+/**
+ * Generate invoice number
  */
 function generateInvoiceNumber(paymentMethod, year, counter) {
   const prefix = paymentMethod === 'CASH' ? '1250' : '2250';
@@ -93,7 +51,7 @@ function generateInvoiceNumber(paymentMethod, year, counter) {
 }
 
 /**
- * Get next invoice counter for the given payment method and year
+ * Get next invoice counter
  */
 async function getNextInvoiceCounter(paymentMethod, year, prisma) {
   const key = `invoice_counter_${paymentMethod.toLowerCase()}_${year}`;
@@ -123,23 +81,7 @@ async function getNextInvoiceCounter(paymentMethod, year, prisma) {
 }
 
 /**
- * Calculate VAT breakdown using YOUR EXACT METHOD
- * GROSS = x, VAT = x * 0.19, NET = GROSS - VAT
- */
-function calculateVATBreakdown(grossAmount) {
-  const vatRate = 0.19; // 19%
-  const vatAmount = Math.round(grossAmount * vatRate * 100) / 100;
-  const netAmount = Math.round((grossAmount - vatAmount) * 100) / 100;
-  
-  return {
-    netAmount,
-    vatAmount,
-    grossAmount: Math.round(grossAmount * 100) / 100
-  };
-}
-
-/**
- * Format currency for display
+ * Format currency
  */
 function formatCurrency(amount) {
   return new Intl.NumberFormat('sk-SK', {
@@ -150,43 +92,24 @@ function formatCurrency(amount) {
 }
 
 /**
- * Format date for Slovak locale
+ * Format date
  */
 function formatDate(date) {
   return new Date(date).toLocaleDateString('sk-SK');
 }
 
 /**
- * Translate menu item name (simplified for Slovak only)
- */
-function translateMenuItem(slug) {
-  if (TRANSLATIONS.menuItems[slug]) {
-    return TRANSLATIONS.menuItems[slug];
-  }
-  // Fallback to original name if no translation found
-  return slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-}
-
-/**
- * Generate invoice PDF with proper UTF-8 encoding
+ * Generate invoice PDF
  */
 function generateInvoicePDF(invoiceData) {
   return new Promise((resolve, reject) => {
     try {
-      // Create PDF with proper settings for UTF-8
       const doc = new PDFDocument({ 
         size: 'A4', 
         margin: 50,
-        bufferPages: true,
-        compress: false,
-        info: {
-          Title: `Faktúra ${invoiceData.invoiceNumber}`,
-          Subject: 'Palace Cafe & Street Food - Faktúra',
-          Author: COMPANY_INFO.name
-        }
+        bufferPages: true
       });
       
-      // Use Helvetica font for better Unicode support
       doc.font('Helvetica');
       
       const buffers = [];
@@ -196,308 +119,233 @@ function generateInvoicePDF(invoiceData) {
         resolve(pdfData);
       });
       
+      // Calculate VAT
+      const vatBreakdown = calculateVATBreakdown(invoiceData.totalGross);
+      
       // Header
-      drawHeader(doc);
+      doc.fontSize(22)
+         .fillColor(COLORS.primary)
+         .text(COMPANY_INFO.name, 50, 50);
       
-      // Invoice info
-      drawInvoiceInfo(doc, invoiceData);
+      doc.fontSize(18)
+         .fillColor(COLORS.secondary)
+         .text('FAKTÚRA', 400, 50, { align: 'right' });
       
-      // Company and customer info
-      drawCompanyInfo(doc);
-      drawCustomerInfo(doc, invoiceData);
+      doc.fontSize(10)
+         .fillColor(COLORS.light)
+         .text('Daňový doklad', 400, 75, { align: 'right' });
+      
+      // Line
+      doc.strokeColor(COLORS.secondary)
+         .lineWidth(2)
+         .moveTo(50, 100)
+         .lineTo(545, 100)
+         .stroke();
+      
+      // Invoice details
+      let y = 120;
+      doc.fontSize(11)
+         .fillColor(COLORS.dark)
+         .text('Číslo faktúry:', 400, y)
+         .font('Helvetica-Bold')
+         .fillColor(COLORS.primary)
+         .text(invoiceData.invoiceNumber, 400, y + 15);
+      
+      y += 40;
+      doc.font('Helvetica')
+         .fillColor(COLORS.dark)
+         .fontSize(10)
+         .text('Dátum vystavenia:', 400, y)
+         .text(formatDate(invoiceData.createdAt), 400, y + 12)
+         .text('Dátum splatnosti:', 400, y + 30)
+         .text(formatDate(invoiceData.createdAt), 400, y + 42);
+      
+      y += 70;
+      doc.text('Číslo objednávky:', 400, y)
+         .font('Helvetica-Bold')
+         .text(`#${invoiceData.order?.orderNumber || 'N/A'}`, 400, y + 12);
+      
+      // Company info
+      y = 120;
+      doc.font('Helvetica-Bold')
+         .fillColor(COLORS.secondary)
+         .fontSize(11)
+         .text('Dodávateľ', 50, y);
+      
+      y += 20;
+      doc.font('Helvetica')
+         .fillColor(COLORS.dark)
+         .fontSize(10)
+         .text(COMPANY_INFO.name, 50, y)
+         .text(COMPANY_INFO.address, 50, y + 12)
+         .text(COMPANY_INFO.city, 50, y + 24)
+         .text(`IČO: ${COMPANY_INFO.ico}`, 50, y + 40)
+         .text(`DIČ: ${COMPANY_INFO.dic}`, 50, y + 52)
+         .text(`IČ DPH: ${COMPANY_INFO.vatNumber}`, 50, y + 64);
+      
+      // Customer info
+      y = 220;
+      doc.font('Helvetica-Bold')
+         .fillColor(COLORS.secondary)
+         .fontSize(11)
+         .text('Odberateľ', 50, y);
+      
+      y += 20;
+      doc.font('Helvetica')
+         .fillColor(COLORS.dark)
+         .fontSize(10)
+         .text(invoiceData.customerName || 'Zákazník', 50, y);
+      
+      if (invoiceData.customerPhone) {
+        doc.text(`Tel: ${invoiceData.customerPhone}`, 50, y + 12);
+        y += 12;
+      }
+      
+      if (invoiceData.customerEmail) {
+        doc.text(`Email: ${invoiceData.customerEmail}`, 50, y + 12);
+      }
       
       // Items table
-      const tableEndY = drawItemsTable(doc, invoiceData);
+      y = 300;
+      
+      // Table header
+      doc.fontSize(10)
+         .font('Helvetica-Bold')
+         .fillColor(COLORS.dark);
+      
+      doc.rect(50, y, 495, 20)
+         .fill(COLORS.background);
+      
+      doc.fillColor(COLORS.dark)
+         .text('Položka', 55, y + 6)
+         .text('Mn.', 300, y + 6)
+         .text('Cena', 350, y + 6)
+         .text('Spolu', 470, y + 6);
+      
+      y += 25;
+      
+      // Items
+      doc.font('Helvetica').fontSize(9);
+      
+      const items = invoiceData.orderItems || [];
+      
+      items.forEach((item, index) => {
+        if (y > 700) {
+          doc.addPage();
+          y = 50;
+        }
+        
+        let displayName = item.name || 'Unknown Item';
+        
+        doc.fillColor(COLORS.dark)
+           .text(displayName, 55, y, { width: 240 })
+           .text((item.quantity || 1).toString(), 300, y)
+           .text(formatCurrency(item.unitPrice || item.price || 0), 350, y)
+           .text(formatCurrency(item.totalPrice || 0), 470, y);
+        
+        if (item.customizations) {
+          y += 12;
+          doc.fontSize(8)
+             .fillColor(COLORS.light)
+             .text(`• ${item.customizations}`, 60, y);
+        }
+        
+        y += 20;
+        
+        if (index < items.length - 1) {
+          doc.strokeColor('#eeeeee')
+             .lineWidth(0.5)
+             .moveTo(55, y - 5)
+             .lineTo(540, y - 5)
+             .stroke();
+        }
+      });
+      
+      // Table bottom
+      doc.strokeColor(COLORS.secondary)
+         .lineWidth(1)
+         .moveTo(50, y)
+         .lineTo(545, y)
+         .stroke();
+      
+      y += 20;
       
       // Totals
-      drawTotals(doc, invoiceData, tableEndY);
+      y = Math.max(y, 500);
+      
+      doc.rect(300, y, 245, 100)
+         .stroke(COLORS.light);
+      
+      y += 15;
+      
+      doc.fontSize(10)
+         .fillColor(COLORS.dark)
+         .text('Medzisúčet:', 310, y)
+         .text(formatCurrency(invoiceData.subtotal || vatBreakdown.netAmount), 480, y, { align: 'right' });
+      
+      if (invoiceData.deliveryFee && invoiceData.deliveryFee > 0) {
+        y += 15;
+        doc.text('Poplatok za doručenie:', 310, y)
+           .text(formatCurrency(invoiceData.deliveryFee), 480, y, { align: 'right' });
+      }
+      
+      y += 15;
+      doc.text('Základ DPH 19%:', 310, y)
+         .text(formatCurrency(vatBreakdown.netAmount), 480, y, { align: 'right' });
+      
+      y += 15;
+      doc.text('DPH 19%:', 310, y)
+         .text(formatCurrency(vatBreakdown.vatAmount), 480, y, { align: 'right' });
+      
+      y += 20;
+      doc.strokeColor(COLORS.secondary)
+         .lineWidth(1)
+         .moveTo(310, y)
+         .lineTo(535, y)
+         .stroke();
+      
+      y += 10;
+      doc.fontSize(12)
+         .font('Helvetica-Bold')
+         .fillColor(COLORS.primary)
+         .text('CELKOM:', 310, y)
+         .text(formatCurrency(invoiceData.totalGross), 480, y, { align: 'right' });
       
       // Footer
-      drawFooter(doc, invoiceData);
+      y = 650;
+      
+      const paymentMethods = {
+        'CASH': 'Hotovosť',
+        'CARD': 'Karta',
+        'ONLINE': 'Online platba'
+      };
+      
+      doc.fontSize(10)
+         .font('Helvetica-Bold')
+         .fillColor(COLORS.secondary)
+         .text('Spôsob platby:', 50, y);
+      
+      doc.font('Helvetica')
+         .fillColor(COLORS.dark)
+         .text(paymentMethods[invoiceData.paymentMethod] || invoiceData.paymentMethod, 150, y);
+      
+      y += 15;
+      doc.font('Helvetica-Bold')
+         .fillColor(COLORS.primary)
+         .text('UHRADENÉ', 50, y);
+      
+      y += 30;
+      doc.fontSize(8)
+         .fillColor(COLORS.light)
+         .text('Ďakujeme za vašu návštevu!', 50, y)
+         .text('Palace Cafe & Street Food - Autentické chute od 2016', 50, y + 12);
       
       doc.end();
+      
     } catch (error) {
       reject(error);
     }
   });
-}
-
-/**
- * Draw PDF header
- */
-function drawHeader(doc) {
-  // Company name in brand color
-  doc.fontSize(24)
-     .fillColor(COLORS.rusticRed)
-     .text(COMPANY_INFO.name, 50, 50);
-  
-  // Invoice title
-  doc.fontSize(20)
-     .fillColor(COLORS.eucalyptusGreen)
-     .text('FAKTÚRA', 350, 50, { align: 'right' });
-  
-  // Tax invoice subtitle
-  doc.fontSize(10)
-     .fillColor(COLORS.lightGray)
-     .text('Daňový doklad', 350, 75, { align: 'right' });
-  
-  // Line separator
-  doc.strokeColor(COLORS.eucalyptusGreen)
-     .lineWidth(2)
-     .moveTo(50, 100)
-     .lineTo(545, 100)
-     .stroke();
-}
-
-/**
- * Draw invoice information
- */
-function drawInvoiceInfo(doc, invoiceData) {
-  let y = 120;
-  
-  // Invoice number
-  doc.fontSize(12)
-     .fillColor(COLORS.darkGray)
-     .text('Číslo faktúry:', 350, y)
-     .font('Helvetica-Bold')
-     .fillColor(COLORS.rusticRed)
-     .text(invoiceData.invoiceNumber, 350, y + 15);
-  
-  // Dates
-  y += 40;
-  doc.font('Helvetica')
-     .fillColor(COLORS.darkGray)
-     .fontSize(10)
-     .text('Dátum vystavenia:', 350, y)
-     .text(formatDate(invoiceData.createdAt), 350, y + 12)
-     .text('Dátum splatnosti:', 350, y + 30)
-     .text(formatDate(invoiceData.createdAt), 350, y + 42);
-  
-  // Order info
-  y += 70;
-  doc.text('Číslo objednávky:', 350, y)
-     .font('Helvetica-Bold')
-     .text(`#${invoiceData.order?.orderNumber || 'N/A'}`, 350, y + 12);
-}
-
-/**
- * Draw company information
- */
-function drawCompanyInfo(doc) {
-  let y = 120;
-  
-  doc.fontSize(12)
-     .font('Helvetica-Bold')
-     .fillColor(COLORS.eucalyptusGreen)
-     .text('Dodávateľ', 50, y);
-  
-  y += 20;
-  doc.font('Helvetica')
-     .fillColor(COLORS.darkGray)
-     .fontSize(10)
-     .text(COMPANY_INFO.name, 50, y)
-     .text(COMPANY_INFO.address, 50, y + 12)
-     .text(COMPANY_INFO.city, 50, y + 24)
-     .text(`IČO: ${COMPANY_INFO.ico}`, 50, y + 40)
-     .text(`DIČ: ${COMPANY_INFO.dic}`, 50, y + 52)
-     .text(`IČ DPH: ${COMPANY_INFO.vatNumber}`, 50, y + 64);
-}
-
-/**
- * Draw customer information
- */
-function drawCustomerInfo(doc, invoiceData) {
-  let y = 220;
-  
-  doc.fontSize(12)
-     .font('Helvetica-Bold')
-     .fillColor(COLORS.eucalyptusGreen)
-     .text('Odberateľ', 50, y);
-  
-  y += 20;
-  doc.font('Helvetica')
-     .fillColor(COLORS.darkGray)
-     .fontSize(10)
-     .text(invoiceData.customerName || 'Zákazník', 50, y);
-  
-  if (invoiceData.customerPhone) {
-    doc.text(`Tel: ${invoiceData.customerPhone}`, 50, y + 12);
-    y += 12;
-  }
-  
-  if (invoiceData.customerEmail) {
-    doc.text(`Email: ${invoiceData.customerEmail}`, 50, y + 12);
-  }
-}
-
-/**
- * Draw items table
- */
-function drawItemsTable(doc, invoiceData) {
-  let y = 300;
-  
-  // Table headers
-  doc.fontSize(10)
-     .font('Helvetica-Bold')
-     .fillColor(COLORS.darkGray);
-  
-  // Header background
-  doc.rect(50, y, 495, 20)
-     .fill(COLORS.veryLightGray);
-  
-  // Header text
-  doc.fillColor(COLORS.darkGray)
-     .text('Položka', 55, y + 6)
-     .text('Mn.', 300, y + 6)
-     .text('Jedn. cena', 350, y + 6)
-     .text('Spolu', 470, y + 6);
-  
-  y += 25;
-  
-  // Items
-  doc.font('Helvetica').fontSize(9);
-  
-  const items = invoiceData.orderItems || [];
-  
-  items.forEach((item, index) => {
-    if (y > 700) { // New page if needed
-      doc.addPage();
-      y = 50;
-    }
-    
-    // Handle different item name formats
-    let displayName = item.name || 'Unknown Item';
-    
-    // If we have slug, try to translate
-    if (item.slug) {
-      displayName = translateMenuItem(item.slug);
-    }
-    
-    // Item row
-    doc.fillColor(COLORS.darkGray)
-       .text(displayName, 55, y, { width: 240 })
-       .text((item.quantity || 1).toString(), 300, y)
-       .text(formatCurrency(item.unitPrice || item.price || 0), 350, y)
-       .text(formatCurrency(item.totalPrice || 0), 470, y);
-    
-    // Customizations (if any)
-    if (item.customizations) {
-      y += 12;
-      doc.fontSize(8)
-         .fillColor(COLORS.lightGray)
-         .text(`• ${item.customizations}`, 60, y);
-    }
-    
-    y += 20;
-    
-    // Line separator
-    if (index < items.length - 1) {
-      doc.strokeColor('#eeeeee')
-         .lineWidth(0.5)
-         .moveTo(55, y - 5)
-         .lineTo(540, y - 5)
-         .stroke();
-    }
-  });
-  
-  // Table bottom border
-  doc.strokeColor(COLORS.eucalyptusGreen)
-     .lineWidth(1)
-     .moveTo(50, y)
-     .lineTo(545, y)
-     .stroke();
-  
-  return y + 20;
-}
-
-/**
- * Draw totals section with YOUR VAT CALCULATION
- */
-function drawTotals(doc, invoiceData, startY) {
-  let y = Math.max(startY, 500);
-  
-  const breakdown = calculateVATBreakdown(invoiceData.totalGross);
-  
-  // Totals box
-  doc.rect(300, y, 245, 120)
-     .stroke(COLORS.lightGray);
-  
-  y += 15;
-  
-  // Subtotal
-  doc.fontSize(10)
-     .fillColor(COLORS.darkGray)
-     .text('Medzisúčet:', 310, y)
-     .text(formatCurrency(invoiceData.subtotal || breakdown.netAmount), 480, y, { align: 'right' });
-  
-  // Delivery fee (if applicable)
-  if (invoiceData.deliveryFee && invoiceData.deliveryFee > 0) {
-    y += 15;
-    doc.text('Poplatok za doručenie:', 310, y)
-       .text(formatCurrency(invoiceData.deliveryFee), 480, y, { align: 'right' });
-  }
-  
-  // VAT base
-  y += 15;
-  doc.text('Základ DPH 19%:', 310, y)
-     .text(formatCurrency(breakdown.netAmount), 480, y, { align: 'right' });
-  
-  // VAT amount
-  y += 15;
-  doc.text('DPH 19%:', 310, y)
-     .text(formatCurrency(breakdown.vatAmount), 480, y, { align: 'right' });
-  
-  // Total line
-  y += 20;
-  doc.strokeColor(COLORS.eucalyptusGreen)
-     .lineWidth(1)
-     .moveTo(310, y)
-     .lineTo(535, y)
-     .stroke();
-  
-  // Final total
-  y += 10;
-  doc.fontSize(12)
-     .font('Helvetica-Bold')
-     .fillColor(COLORS.rusticRed)
-     .text('CELKOM:', 310, y)
-     .text(formatCurrency(invoiceData.totalGross), 480, y, { align: 'right' });
-}
-
-/**
- * Draw footer with payment info
- */
-function drawFooter(doc, invoiceData) {
-  let y = 650;
-  
-  // Payment method
-  const paymentMethods = {
-    'CASH': 'Hotovosť',
-    'CARD': 'Karta',
-    'ONLINE': 'Online platba'
-  };
-  
-  doc.fontSize(10)
-     .font('Helvetica-Bold')
-     .fillColor(COLORS.eucalyptusGreen)
-     .text('Spôsob platby:', 50, y);
-  
-  doc.font('Helvetica')
-     .fillColor(COLORS.darkGray)
-     .text(paymentMethods[invoiceData.paymentMethod] || invoiceData.paymentMethod, 200, y);
-  
-  // Payment status
-  y += 15;
-  doc.font('Helvetica-Bold')
-     .fillColor(COLORS.rusticRed)
-     .text('UHRADENÉ', 50, y);
-  
-  // Footer note
-  y += 40;
-  doc.fontSize(8)
-     .fillColor(COLORS.lightGray)
-     .text('Ďakujeme za vašu návštevu!', 50, y)
-     .text('Palace Cafe & Street Food - Autentické chute od 2016', 50, y + 12);
 }
 
 module.exports = {
