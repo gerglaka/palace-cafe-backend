@@ -234,12 +234,12 @@ function drawHeader(doc) {
   // Invoice title
   doc.fontSize(20)
      .fillColor(COLORS.eucalyptusGreen)
-     .text(TRANSLATIONS.invoice, 350, 50, { align: 'right' });
+     .text('FAKTÚRA', 350, 50, { align: 'right' });
   
   // Tax invoice subtitle
   doc.fontSize(10)
      .fillColor(COLORS.lightGray)
-     .text(TRANSLATIONS.taxInvoice, 350, 75, { align: 'right' });
+     .text('Daňový doklad', 350, 75, { align: 'right' });
   
   // Line separator
   doc.strokeColor(COLORS.eucalyptusGreen)
@@ -268,14 +268,14 @@ function drawInvoiceInfo(doc, invoiceData) {
   doc.font('Helvetica')
      .fillColor(COLORS.darkGray)
      .fontSize(10)
-     .text(TRANSLATIONS.issueDate + ':', 350, y)
+     .text('Dátum vystavenia:', 350, y)
      .text(formatDate(invoiceData.createdAt), 350, y + 12)
-     .text(TRANSLATIONS.dueDate + ':', 350, y + 30)
+     .text('Dátum splatnosti:', 350, y + 30)
      .text(formatDate(invoiceData.createdAt), 350, y + 42);
   
   // Order info
   y += 70;
-  doc.text(TRANSLATIONS.orderNumber + ':', 350, y)
+  doc.text('Číslo objednávky:', 350, y)
      .font('Helvetica-Bold')
      .text(`#${invoiceData.order?.orderNumber || 'N/A'}`, 350, y + 12);
 }
@@ -289,7 +289,7 @@ function drawCompanyInfo(doc) {
   doc.fontSize(12)
      .font('Helvetica-Bold')
      .fillColor(COLORS.eucalyptusGreen)
-     .text(TRANSLATIONS.supplier, 50, y);
+     .text('Dodávateľ', 50, y);
   
   y += 20;
   doc.font('Helvetica')
@@ -312,7 +312,7 @@ function drawCustomerInfo(doc, invoiceData) {
   doc.fontSize(12)
      .font('Helvetica-Bold')
      .fillColor(COLORS.eucalyptusGreen)
-     .text(TRANSLATIONS.customer, 50, y);
+     .text('Odberateľ', 50, y);
   
   y += 20;
   doc.font('Helvetica')
@@ -347,7 +347,7 @@ function drawItemsTable(doc, invoiceData) {
   
   // Header text
   doc.fillColor(COLORS.darkGray)
-     .text(TRANSLATIONS.item, 55, y + 6)
+     .text('Položka', 55, y + 6)
      .text('Mn.', 300, y + 6)
      .text('Jedn. cena', 350, y + 6)
      .text('Spolu', 470, y + 6);
@@ -427,24 +427,24 @@ function drawTotals(doc, invoiceData, startY) {
   // Subtotal
   doc.fontSize(10)
      .fillColor(COLORS.darkGray)
-     .text(TRANSLATIONS.subtotal + ':', 310, y)
+     .text('Medzisúčet:', 310, y)
      .text(formatCurrency(invoiceData.subtotal || breakdown.netAmount), 480, y, { align: 'right' });
   
   // Delivery fee (if applicable)
   if (invoiceData.deliveryFee && invoiceData.deliveryFee > 0) {
     y += 15;
-    doc.text(TRANSLATIONS.deliveryFee + ':', 310, y)
+    doc.text('Poplatok za doručenie:', 310, y)
        .text(formatCurrency(invoiceData.deliveryFee), 480, y, { align: 'right' });
   }
   
   // VAT base
   y += 15;
-  doc.text(TRANSLATIONS.vatBase + ':', 310, y)
+  doc.text('Základ DPH 19%:', 310, y)
      .text(formatCurrency(breakdown.netAmount), 480, y, { align: 'right' });
   
   // VAT amount
   y += 15;
-  doc.text(TRANSLATIONS.vatAmount + ':', 310, y)
+  doc.text('DPH 19%:', 310, y)
      .text(formatCurrency(breakdown.vatAmount), 480, y, { align: 'right' });
   
   // Total line
@@ -472,15 +472,15 @@ function drawFooter(doc, invoiceData) {
   
   // Payment method
   const paymentMethods = {
-    'CASH': TRANSLATIONS.cash,
-    'CARD': TRANSLATIONS.card,
-    'ONLINE': TRANSLATIONS.online
+    'CASH': 'Hotovosť',
+    'CARD': 'Karta',
+    'ONLINE': 'Online platba'
   };
   
   doc.fontSize(10)
      .font('Helvetica-Bold')
      .fillColor(COLORS.eucalyptusGreen)
-     .text(TRANSLATIONS.paymentMethod + ':', 50, y);
+     .text('Spôsob platby:', 50, y);
   
   doc.font('Helvetica')
      .fillColor(COLORS.darkGray)
@@ -490,7 +490,7 @@ function drawFooter(doc, invoiceData) {
   y += 15;
   doc.font('Helvetica-Bold')
      .fillColor(COLORS.rusticRed)
-     .text(TRANSLATIONS.paid.toUpperCase(), 50, y);
+     .text('UHRADENÉ', 50, y);
   
   // Footer note
   y += 40;
@@ -506,6 +506,5 @@ module.exports = {
   getNextInvoiceCounter,
   calculateVATBreakdown,
   formatCurrency,
-  COMPANY_INFO,
-  TRANSLATIONS
+  COMPANY_INFO
 };
