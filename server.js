@@ -883,8 +883,11 @@ app.post('/api/stripe/create-payment-intent', orderLimiter, asyncHandler(async (
         amount: Math.round(amount * 100), // Convert euros to cents
         currency: currency.toLowerCase(),
         customer: customer.id,
-        payment_method_types: ['card'],
         capture_method: 'automatic', // Charge immediately on confirmation
+        automatic_payment_methods: {
+          enabled: true,
+          allow_redirects: 'never'
+        },
         description: `Palace Cafe Order - ${orderData.customerName}`,
         metadata: {
             customer_name: orderData.customerName,
@@ -896,7 +899,7 @@ app.post('/api/stripe/create-payment-intent', orderLimiter, asyncHandler(async (
         },
         receipt_email: orderData.customerEmail
     };
-    
+
     // Only add shipping for delivery orders
     if (orderData.orderType === 'DELIVERY' && orderData.deliveryAddress) {
         paymentIntentParams.shipping = {
@@ -909,7 +912,7 @@ app.post('/api/stripe/create-payment-intent', orderLimiter, asyncHandler(async (
             }
         };
     }
-    
+
     // Create payment intent
     const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams);
 
