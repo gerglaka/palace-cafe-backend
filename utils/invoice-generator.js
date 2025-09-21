@@ -20,13 +20,6 @@ const COMPANY_INFO = {
   vatNumber: 'SK2122291578'
 };
 
-// Add this after creating the PDFDocument
-const fontPath = path.join(__dirname, 'fonts', 'Roboto-Regular.ttf');
-if (fs.existsSync(fontPath)) {
-  doc.registerFont('Roboto', fontPath);
-  doc.font('Roboto');
-}
-
 // Brand colors
 const COLORS = {
   rusticRed: '#38141A',
