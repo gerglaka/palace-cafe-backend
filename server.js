@@ -54,12 +54,16 @@ app.use(cors({
     'http://127.0.0.1:3000',
     'http://localhost:5500',
     'http://127.0.0.1:5500',
-    'file://' 
+    'file://', 
+    'https://js.stripe.com'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token']
 }));
+
+// Stripe webhook needs raw body, so handle it before JSON parsing
+app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }));
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -1216,7 +1220,7 @@ app.post('/api/stripe/confirm-payment', orderLimiter, asyncHandler(async (req, r
 }));
 
 // Stripe webhook handler (for payment confirmations and updates)
-app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), asyncHandler(async (req, res) => {
+app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyncHandler(async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
 
@@ -1243,13 +1247,22 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
         });
 
         if (payment && payment.order.status === 'PENDING') {
-          await prisma.order.update({
+          const updatedOrder = await prisma.order.update({
             where: { id: payment.orderId },
             data: { 
               status: 'CONFIRMED',
               confirmedAt: new Date()
             }
           });
+          
+          // Emit WebSocket event for real-time updates
+          io.emit('orderStatusUpdate', {
+            id: updatedOrder.id,
+            orderNumber: updatedOrder.orderNumber,
+            status: updatedOrder.status,
+            confirmedAt: updatedOrder.confirmedAt
+          });
+          
           console.log(`📋 Order ${payment.order.orderNumber} confirmed via webhook`);
         }
       } catch (error) {
@@ -1261,10 +1274,11 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
       const failedPayment = event.data.object;
       console.log('❌ Payment failed:', failedPayment.id);
       
-      // Handle failed payment (update order status, notify customer, etc.)
+      // Handle failed payment
       try {
         const payment = await prisma.payment.findFirst({
-          where: { transactionId: failedPayment.id }
+          where: { transactionId: failedPayment.id },
+          include: { order: true }
         });
 
         if (payment) {
@@ -1272,10 +1286,30 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
             where: { id: payment.id },
             data: { status: 'FAILED' }
           });
+          
+          // Optionally update order status to cancelled
+          await prisma.order.update({
+            where: { id: payment.orderId },
+            data: { status: 'CANCELLED' }
+          });
+          
+          console.log(`📋 Order ${payment.order.orderNumber} cancelled due to payment failure`);
         }
       } catch (error) {
         console.error('❌ Failed to update failed payment:', error);
       }
+      break;
+
+    case 'checkout.session.completed':
+      const session = event.data.object;
+      console.log('🛒 Checkout session completed:', session.id);
+      // Handle checkout session completion if using Stripe Checkout
+      break;
+
+    case 'charge.dispute.created':
+      const dispute = event.data.object;
+      console.log('⚠️ Charge disputed:', dispute.id);
+      // Handle chargebacks/disputes
       break;
 
     default:
