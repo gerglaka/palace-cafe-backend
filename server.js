@@ -815,6 +815,489 @@ io.on('connection', (socket) => {
   });
 });
 
+// ============================================
+// STRIPE PAYMENT PROCESSING APIs
+// ============================================
+
+// Initialize Stripe with secret key
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+
+// Create payment intent (Step 1: Setup payment)
+app.post('/api/stripe/create-payment-intent', orderLimiter, asyncHandler(async (req, res) => {
+  const {
+    amount,
+    currency = 'eur',
+    orderData, // Customer info and order details
+    metadata = {}
+  } = req.body;
+
+  console.log('💳 Creating Stripe payment intent...');
+  console.log('- Amount:', amount, currency.toUpperCase());
+  console.log('- Customer:', orderData?.customerName);
+
+  // Validation
+  if (!amount || amount < 50) { // Minimum 50 cents
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid amount. Minimum payment is €0.50'
+    });
+  }
+
+  if (!orderData?.customerName || !orderData?.customerEmail) {
+    return res.status(400).json({
+      success: false,
+      error: 'Customer name and email are required for payment processing'
+    });
+  }
+
+  try {
+    // Create or retrieve customer in Stripe
+    let customer;
+    const existingCustomers = await stripe.customers.list({
+      email: orderData.customerEmail,
+      limit: 1
+    });
+
+    if (existingCustomers.data.length > 0) {
+      customer = existingCustomers.data[0];
+      console.log('🔍 Found existing Stripe customer:', customer.id);
+    } else {
+      customer = await stripe.customers.create({
+        email: orderData.customerEmail,
+        name: orderData.customerName,
+        phone: orderData.customerPhone,
+        metadata: {
+          restaurant: 'Palace Cafe & Street Food',
+          source: 'website_order'
+        }
+      });
+      console.log('✅ Created new Stripe customer:', customer.id);
+    }
+
+    // Create payment intent
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(amount * 100), // Convert euros to cents
+      currency: currency.toLowerCase(),
+      customer: customer.id,
+      payment_method_types: ['card'],
+      capture_method: 'automatic', // Charge immediately on confirmation
+      description: `Palace Cafe Order - ${orderData.customerName}`,
+      metadata: {
+        customer_name: orderData.customerName,
+        customer_email: orderData.customerEmail,
+        customer_phone: orderData.customerPhone || '',
+        order_type: orderData.orderType || 'PICKUP',
+        restaurant: 'Palace Cafe & Street Food',
+        ...metadata
+      },
+      receipt_email: orderData.customerEmail,
+      shipping: orderData.orderType === 'DELIVERY' ? {
+        name: orderData.customerName,
+        phone: orderData.customerPhone,
+        address: {
+          line1: orderData.deliveryAddress || '',
+          city: 'Komárno',
+          country: 'SK'
+        }
+      } : null
+    });
+
+    console.log('✅ Payment intent created:', paymentIntent.id);
+
+    res.json({
+      success: true,
+      data: {
+        clientSecret: paymentIntent.client_secret,
+        paymentIntentId: paymentIntent.id,
+        customerId: customer.id,
+        amount: paymentIntent.amount,
+        currency: paymentIntent.currency
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Stripe payment intent creation failed:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to create payment intent'
+    });
+  }
+}));
+
+// Confirm payment and create order (Step 2: After successful payment)
+app.post('/api/stripe/confirm-payment', orderLimiter, asyncHandler(async (req, res) => {
+  const {
+    paymentIntentId,
+    orderData // Complete order information
+  } = req.body;
+
+  console.log('🔄 Confirming Stripe payment and creating order...');
+  console.log('- Payment Intent:', paymentIntentId);
+  console.log('- Customer:', orderData?.customerName);
+
+  // Validation
+  if (!paymentIntentId || !orderData) {
+    return res.status(400).json({
+      success: false,
+      error: 'Payment Intent ID and order data are required'
+    });
+  }
+
+  try {
+    // Retrieve payment intent to verify status
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    
+    if (paymentIntent.status !== 'succeeded') {
+      return res.status(400).json({
+        success: false,
+        error: 'Payment not completed. Status: ' + paymentIntent.status
+      });
+    }
+
+    console.log('✅ Payment confirmed, creating order...');
+
+    // Extract order data
+    const {
+      customerName,
+      customerPhone,
+      customerEmail,
+      orderType,
+      deliveryAddress,
+      deliveryNotes,
+      specialNotes,
+      items,
+      scheduledFor
+    } = orderData;
+
+    // Get restaurant settings for delivery fee
+    const restaurant = await prisma.restaurant.findFirst();
+    const deliveryFee = (orderType === 'DELIVERY') ? restaurant?.deliveryFee || 2.50 : 0;
+
+    // Calculate totals and prepare order items (same logic as cash orders)
+    let subtotal = 0;
+    const orderItems = [];
+    const invoiceItems = [];
+
+    for (const item of items) {
+      const menuItem = await prisma.menuItem.findUnique({
+        where: { id: item.menuItemId },
+        include: {
+          translations: { where: { language: 'hu' } }
+        }
+      });
+
+      if (!menuItem) {
+        return res.status(400).json({
+          success: false,
+          error: `Menu item with ID ${item.menuItemId} not found`
+        });
+      }
+
+      let itemTotal = menuItem.price * item.quantity;
+      let customizations = [];
+      
+      // Add fries upgrade cost
+      if (item.friesUpgrade) {
+        const friesOption = await prisma.friesOption.findFirst({
+          where: { slug: item.friesUpgrade },
+          include: { translations: { where: { language: 'hu' } } }
+        });
+        
+        if (friesOption) {
+          if (menuItem.includesSides) {
+            if (friesOption.slug !== 'regular' && friesOption.slug !== 'regular-fries') {
+              itemTotal += friesOption.priceAddon * item.quantity;
+              customizations.push(`${friesOption.translations[0]?.name || friesOption.slug} (+€${friesOption.priceAddon})`);
+            } else {
+              customizations.push(friesOption.translations[0]?.name || 'Regular fries');
+            }
+          } else {
+            itemTotal += friesOption.priceAddon * item.quantity;
+            customizations.push(`${friesOption.translations[0]?.name || friesOption.slug} (+€${friesOption.priceAddon})`);
+          }
+        }
+      }
+
+      // Add sauce selection
+      if (item.selectedSauce) {
+        const sauce = await prisma.sauce.findFirst({
+          where: { slug: item.selectedSauce },
+          include: { translations: { where: { language: 'hu' } } }
+        });
+        if (sauce) {
+          customizations.push(sauce.translations[0]?.name || sauce.slug);
+        }
+      }
+
+      // Add extras cost
+      if (item.extras && item.extras.length > 0) {
+        const extrasCount = item.extras.length;
+        const extrasCost = extrasCount * 0.30;
+        itemTotal += extrasCost * item.quantity;
+        customizations.push(`${extrasCount} extra(s) (+€${extrasCost.toFixed(2)})`);
+      }
+
+      subtotal += itemTotal;
+      
+      // For database
+      orderItems.push({
+        menuItemId: item.menuItemId,
+        quantity: item.quantity,
+        unitPrice: menuItem.price,
+        totalPrice: itemTotal,
+        selectedSauce: item.selectedSauce || null,
+        friesUpgrade: item.friesUpgrade || null,
+        extras: item.extras || [],
+        removeItems: item.removeItems || [],
+        specialNotes: item.specialNotes || null
+      });
+
+      // For invoice
+      invoiceItems.push({
+        slug: menuItem.slug,
+        name: menuItem.translations[0]?.name || 'Unknown Item',
+        quantity: item.quantity,
+        unitPrice: menuItem.price,
+        totalPrice: itemTotal,
+        customizations: customizations.join(', ')
+      });
+    }
+
+    const total = subtotal + deliveryFee;
+
+    // Verify payment amount matches order total
+    const paidAmount = paymentIntent.amount / 100; // Convert cents to euros
+    if (Math.abs(paidAmount - total) > 0.01) { // Allow 1 cent difference for rounding
+      console.error('❌ Payment amount mismatch:', paidAmount, 'vs', total);
+      return res.status(400).json({
+        success: false,
+        error: 'Payment amount does not match order total'
+      });
+    }
+
+    // Create order in database
+    const order = await prisma.order.create({
+      data: {
+        orderNumber: generateOrderNumber(),
+        status: 'CONFIRMED', // Card payments start as confirmed
+        orderType,
+        paymentMethod: 'CARD', // Use CARD for Stripe payments
+        paymentStatus: 'COMPLETED', // Payment already processed
+        customerName,
+        customerPhone,
+        customerEmail,
+        deliveryAddress: orderType === 'DELIVERY' ? deliveryAddress : null,
+        deliveryNotes: deliveryNotes || null,
+        specialNotes: specialNotes || null,
+        subtotal,
+        deliveryFee,
+        total,
+        scheduledFor: scheduledFor ? new Date(scheduledFor) : null,
+        estimatedTime: new Date(Date.now() + 30 * 60 * 1000), // 30 minutes for card orders
+        confirmedAt: new Date(), // Already confirmed by payment
+        items: {
+          create: orderItems
+        }
+      },
+      include: {
+        items: {
+          include: {
+            menuItem: {
+              include: {
+                translations: { where: { language: 'hu' } }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    // Create payment record
+    await prisma.payment.create({
+      data: {
+        orderId: order.id,
+        paymentMethod: 'CARD',
+        status: 'COMPLETED',
+        amount: total,
+        currency: 'EUR',
+        transactionId: paymentIntent.id,
+        gatewayResponse: {
+          stripe_payment_intent: paymentIntentId,
+          stripe_customer: paymentIntent.customer,
+          payment_method: paymentIntent.payment_method,
+          amount_received: paymentIntent.amount_received
+        }
+      }
+    });
+
+    console.log(`✅ Order created: ${order.orderNumber}`);
+
+    // Generate invoice in background (same as cash orders)
+    setImmediate(async () => {
+      try {
+        console.log('📄 Generating invoice for card payment...');
+        
+        const currentYear = new Date().getFullYear();
+        const invoiceCounter = await getNextInvoiceCounter('CARD', currentYear, prisma);
+        const invoiceNumber = generateInvoiceNumber('CARD', currentYear, invoiceCounter);
+        const vatBreakdown = calculateVATBreakdown(total);
+        
+        const invoice = await prisma.invoice.create({
+          data: {
+            invoiceNumber,
+            orderId: order.id,
+            customerName,
+            customerEmail,
+            customerPhone,
+            subtotal,
+            deliveryFee,
+            totalNet: vatBreakdown.netAmount,
+            vatAmount: vatBreakdown.vatAmount,
+            totalGross: vatBreakdown.grossAmount,
+            paymentMethod: 'CARD',
+            orderItems: invoiceItems,
+            emailSent: false
+          },
+          include: { order: true }
+        });
+
+        console.log(`📋 Invoice created: ${invoiceNumber}`);
+
+        // Generate and send invoice (when email is re-enabled)
+        // const pdfBuffer = await generateInvoicePDF({ ...invoice, orderItems: invoiceItems });
+        // await sendInvoiceEmail(invoice, pdfBuffer, customerEmail);
+
+      } catch (invoiceError) {
+        console.error('❌ Invoice generation failed for card payment:', invoiceError);
+      }
+    });
+
+    // Emit WebSocket event for admin dashboard
+    io.emit('newOrder', {
+      id: order.id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+      customerName: order.customerName,
+      orderType: order.orderType,
+      total: order.total,
+      paymentMethod: 'CARD',
+      createdAt: order.createdAt,
+      items: order.items.map(item => ({
+        name: item.menuItem.translations[0]?.name || 'Unknown',
+        quantity: item.quantity
+      }))
+    });
+
+    console.log(`🎉 Stripe order ${order.orderNumber} completed successfully`);
+
+    // Return success response
+    res.status(201).json({
+      success: true,
+      data: {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+        estimatedTime: order.estimatedTime,
+        total: order.total,
+        paymentIntentId: paymentIntentId,
+        invoiceGenerated: true
+      },
+      message: 'Payment successful! Order confirmed.'
+    });
+
+  } catch (error) {
+    console.error('❌ Stripe order creation failed:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process payment and create order',
+      details: error.message
+    });
+  }
+}));
+
+// Stripe webhook handler (for payment confirmations and updates)
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), asyncHandler(async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+
+  try {
+    // Verify webhook signature
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    console.log('📡 Stripe webhook received:', event.type);
+  } catch (err) {
+    console.error('❌ Webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Handle different event types
+  switch (event.type) {
+    case 'payment_intent.succeeded':
+      const paymentIntent = event.data.object;
+      console.log('✅ Payment succeeded:', paymentIntent.id);
+      
+      // Update order status if needed
+      try {
+        const payment = await prisma.payment.findFirst({
+          where: { transactionId: paymentIntent.id },
+          include: { order: true }
+        });
+
+        if (payment && payment.order.status === 'PENDING') {
+          await prisma.order.update({
+            where: { id: payment.orderId },
+            data: { 
+              status: 'CONFIRMED',
+              confirmedAt: new Date()
+            }
+          });
+          console.log(`📋 Order ${payment.order.orderNumber} confirmed via webhook`);
+        }
+      } catch (error) {
+        console.error('❌ Failed to update order from webhook:', error);
+      }
+      break;
+
+    case 'payment_intent.payment_failed':
+      const failedPayment = event.data.object;
+      console.log('❌ Payment failed:', failedPayment.id);
+      
+      // Handle failed payment (update order status, notify customer, etc.)
+      try {
+        const payment = await prisma.payment.findFirst({
+          where: { transactionId: failedPayment.id }
+        });
+
+        if (payment) {
+          await prisma.payment.update({
+            where: { id: payment.id },
+            data: { status: 'FAILED' }
+          });
+        }
+      } catch (error) {
+        console.error('❌ Failed to update failed payment:', error);
+      }
+      break;
+
+    default:
+      console.log(`Unhandled event type: ${event.type}`);
+  }
+
+  res.json({ received: true });
+}));
+
+// Get Stripe publishable key for frontend
+app.get('/api/stripe/config', asyncHandler(async (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
+      currency: 'eur',
+      country: 'SK'
+    }
+  });
+}));
+
+
 
 // ============================================
 // ADMIN AUTHENTICATION APIs
