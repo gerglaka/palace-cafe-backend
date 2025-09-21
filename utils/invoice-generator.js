@@ -110,7 +110,7 @@ function generateInvoicePDF(invoiceData) {
         bufferPages: true
       });
       
-      doc.font('Times-Roman');
+      doc.font('Helvetica');
       
       const buffers = [];
       doc.on('data', buffers.push.bind(buffers));
@@ -147,12 +147,12 @@ function generateInvoicePDF(invoiceData) {
       doc.fontSize(11)
          .fillColor(COLORS.dark)
          .text('Číslo faktúry:', 400, y)
-         .font('Times-Bold')
+         .font('Helvetica-Bold')
          .fillColor(COLORS.primary)
          .text(invoiceData.invoiceNumber, 400, y + 15);
       
       y += 40;
-      doc.font('Times-Roman')
+      doc.font('Helvetica')
          .fillColor(COLORS.dark)
          .fontSize(10)
          .text('Dátum vystavenia:', 400, y)
@@ -162,18 +162,18 @@ function generateInvoicePDF(invoiceData) {
       
       y += 70;
       doc.text('Číslo objednávky:', 400, y)
-         .font('Times-Bold')
+         .font('Helvetica-Bold')
          .text(`#${invoiceData.order?.orderNumber || 'N/A'}`, 400, y + 12);
       
       // Company info
       y = 120;
-      doc.font('Times-Bold')
+      doc.font('Helvetica-Bold')
          .fillColor(COLORS.secondary)
          .fontSize(11)
          .text('Dodávateľ', 50, y);
       
       y += 20;
-      doc.font('Times-Roman')
+      doc.font('Helvetica')
          .fillColor(COLORS.dark)
          .fontSize(10)
          .text(COMPANY_INFO.name, 50, y)
@@ -185,13 +185,13 @@ function generateInvoicePDF(invoiceData) {
       
       // Customer info
       y = 220;
-      doc.font('Times-Bold')
+      doc.font('Helvetica-Bold')
          .fillColor(COLORS.secondary)
          .fontSize(11)
          .text('Odberateľ', 50, y);
       
       y += 20;
-      doc.font('Times-Roman')
+      doc.font('Helvetica')
          .fillColor(COLORS.dark)
          .fontSize(10)
          .text(invoiceData.customerName || 'Zákazník', 50, y);
@@ -210,7 +210,7 @@ function generateInvoicePDF(invoiceData) {
       
       // Table header
       doc.fontSize(10)
-         .font('Times-Bold')
+         .font('Helvetica-Bold')
          .fillColor(COLORS.dark);
       
       doc.rect(50, y, 495, 20)
@@ -225,7 +225,7 @@ function generateInvoicePDF(invoiceData) {
       y += 25;
       
       // Items
-      doc.font('Times-Roman').fontSize(9);
+      doc.font('Helvetica').fontSize(9);
       
       const items = invoiceData.orderItems || [];
       
@@ -306,7 +306,7 @@ function generateInvoicePDF(invoiceData) {
       
       y += 10;
       doc.fontSize(12)
-         .font('Times-Bold')
+         .font('Helvetica-Bold')
          .fillColor(COLORS.primary)
          .text('CELKOM:', 310, y)
          .text(formatCurrency(invoiceData.totalGross), 480, y, { align: 'right' });
@@ -321,16 +321,16 @@ function generateInvoicePDF(invoiceData) {
       };
       
       doc.fontSize(10)
-         .font('Times-Bold')
+         .font('Helvetica-Bold')
          .fillColor(COLORS.secondary)
          .text('Spôsob platby:', 50, y);
       
-      doc.font('Times-Roman')
+      doc.font('Helvetica')
          .fillColor(COLORS.dark)
          .text(paymentMethods[invoiceData.paymentMethod] || invoiceData.paymentMethod, 150, y);
       
       y += 15;
-      doc.font('Times-Bold')
+      doc.font('Helvetica-Bold')
          .fillColor(COLORS.primary)
          .text('UHRADENÉ', 50, y);
       
