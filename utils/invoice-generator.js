@@ -125,15 +125,16 @@ async function getNextInvoiceCounter(paymentMethod, year, prisma) {
 
 /**
  * Calculate VAT breakdown (19% Slovak rate)
+ * Corrected: net = gross / 1.19, vat = gross * 0.19
  */
 function calculateVATBreakdown(grossAmount) {
   const vatRate = 0.19; // 19%
-  const netAmount = grossAmount / (1 + vatRate);
-  const vatAmount = grossAmount - netAmount;
+  const netAmount = Math.round(grossAmount / (1 + vatRate) * 100) / 100;
+  const vatAmount = Math.round(grossAmount * vatRate * 100) / 100;
   
   return {
-    netAmount: Math.round(netAmount * 100) / 100,
-    vatAmount: Math.round(vatAmount * 100) / 100,
+    netAmount,
+    vatAmount,
     grossAmount: Math.round(grossAmount * 100) / 100
   };
 }
@@ -186,14 +187,24 @@ function generateInvoicePDF(invoiceData) {
         }
       });
 
-      // Register Unicode-supporting fonts (download DejaVuSans from https://dejavu-fonts.github.io/ and place in a 'fonts' directory)
-      const fontPath = path.join(__dirname, 'fonts/DejaVuSans.ttf');
-      const boldFontPath = path.join(__dirname, 'fonts/DejaVuSans-Bold.ttf');
-      doc.registerFont('DejaVu', fontPath);
-      doc.registerFont('DejaVu-Bold', boldFontPath);
+      // Register Unicode-supporting fonts (download DejaVuSans from https://dejavu-fonts.github.io/Download.html and place in a 'fonts' directory relative to this script)
+      let defaultFont = 'Helvetica';
+      let boldFont = 'Helvetica-Bold';
+      try {
+        const fontPath = path.join(__dirname, 'fonts/DejaVuSans.ttf');
+        const boldFontPath = path.join(__dirname, 'fonts/DejaVuSans-Bold.ttf');
+        if (fs.existsSync(fontPath) && fs.existsSync(boldFontPath)) {
+          doc.registerFont('DejaVu', fontPath);
+          doc.registerFont('DejaVu-Bold', boldFontPath);
+          defaultFont = 'DejaVu';
+          boldFont = 'DejaVu-Bold';
+        }
+      } catch (fontError) {
+        console.warn('Custom fonts not found, falling back to built-in fonts (may have limited Unicode support)');
+      }
 
       // Set default font
-      doc.font('DejaVu');
+      doc.font(defaultFont);
 
       const buffers = [];
       doc.on('data', buffers.push.bind(buffers));
@@ -203,23 +214,23 @@ function generateInvoicePDF(invoiceData) {
       });
       
       // Header
-      drawHeader(doc);
+      drawHeader(doc, defaultFont, boldFont);
       
       // Invoice info
-      drawInvoiceInfo(doc, invoiceData);
+      drawInvoiceInfo(doc, invoiceData, defaultFont, boldFont);
       
       // Company and customer info
-      drawCompanyInfo(doc);
-      drawCustomerInfo(doc, invoiceData);
+      drawCompanyInfo(doc, defaultFont, boldFont);
+      drawCustomerInfo(doc, invoiceData, defaultFont, boldFont);
       
       // Items table
-      const tableEndY = drawItemsTable(doc, invoiceData);
+      const tableEndY = drawItemsTable(doc, invoiceData, defaultFont, boldFont);
       
       // Totals
-      drawTotals(doc, invoiceData, tableEndY);
+      drawTotals(doc, invoiceData, tableEndY, defaultFont, boldFont);
       
       // Footer
-      drawFooter(doc, invoiceData);
+      drawFooter(doc, invoiceData, defaultFont, boldFont);
       
       doc.end();
     } catch (error) {
@@ -231,20 +242,23 @@ function generateInvoicePDF(invoiceData) {
 /**
  * Draw PDF header
  */
-function drawHeader(doc) {
+function drawHeader(doc, defaultFont, boldFont) {
   // Company name in brand color
   doc.fontSize(24)
      .fillColor(COLORS.rusticRed)
+     .font(defaultFont)
      .text(COMPANY_INFO.name, 50, 50);
   
   // Invoice title
   doc.fontSize(20)
      .fillColor(COLORS.eucalyptusGreen)
+     .font(defaultFont)
      .text('FAKTÚRA / SZÁMLA', 350, 50, { align: 'right' });
   
   // Tax invoice subtitle
   doc.fontSize(10)
      .fillColor(COLORS.lightGray)
+     .font(defaultFont)
      .text('Daňový doklad / Adóbizonylat', 350, 75, { align: 'right' });
   
   // Line separator
@@ -258,47 +272,49 @@ function drawHeader(doc) {
 /**
  * Draw invoice information
  */
-function drawInvoiceInfo(doc, invoiceData) {
+function drawInvoiceInfo(doc, invoiceData, defaultFont, boldFont) {
   let y = 120;
   
   // Invoice number
   doc.fontSize(12)
      .fillColor(COLORS.darkGray)
+     .font(defaultFont)
      .text('Číslo faktúry / Számla száma:', 350, y)
-     .font('DejaVu-Bold')
+     .font(boldFont)
      .fillColor(COLORS.rusticRed)
      .text(invoiceData.invoiceNumber, 350, y + 15);
   
   // Dates
   y += 40;
-  doc.font('DejaVu')
+  doc.font(defaultFont)
      .fillColor(COLORS.darkGray)
      .fontSize(10)
      .text('Dátum vystavenia / Kiállítás dátuma:', 350, y)
      .text(formatDate(invoiceData.createdAt), 350, y + 12)
-     .text('Dátum splatnosti / Esedékesség dátuma:', 350, y + 30)
+     .text('Dátum splatnosti / Esedékesség:', 350, y + 30)
      .text(formatDate(invoiceData.createdAt), 350, y + 42);
   
   // Order info
   y += 70;
-  doc.text('Číslo objednávky / Rendelés száma:', 350, y)
-     .font('DejaVu-Bold')
+  doc.font(defaultFont)
+     .text('Číslo objednávky / Rendelés száma:', 350, y)
+     .font(boldFont)
      .text(`#${invoiceData.order?.orderNumber || 'N/A'}`, 350, y + 12);
 }
 
 /**
  * Draw company information
  */
-function drawCompanyInfo(doc) {
+function drawCompanyInfo(doc, defaultFont, boldFont) {
   let y = 120;
   
   doc.fontSize(12)
-     .font('DejaVu-Bold')
+     .font(boldFont)
      .fillColor(COLORS.eucalyptusGreen)
      .text('Dodávateľ / Szállító', 50, y);
   
   y += 20;
-  doc.font('DejaVu')
+  doc.font(defaultFont)
      .fillColor(COLORS.darkGray)
      .fontSize(10)
      .text(COMPANY_INFO.name, 50, y)
@@ -312,16 +328,16 @@ function drawCompanyInfo(doc) {
 /**
  * Draw customer information
  */
-function drawCustomerInfo(doc, invoiceData) {
+function drawCustomerInfo(doc, invoiceData, defaultFont, boldFont) {
   let y = 220;
   
   doc.fontSize(12)
-     .font('DejaVu-Bold')
+     .font(boldFont)
      .fillColor(COLORS.eucalyptusGreen)
      .text('Odberateľ / Vevő', 50, y);
   
   y += 20;
-  doc.font('DejaVu')
+  doc.font(defaultFont)
      .fillColor(COLORS.darkGray)
      .fontSize(10)
      .text(invoiceData.customerName || 'Zákazník / Vásárló', 50, y);
@@ -339,12 +355,12 @@ function drawCustomerInfo(doc, invoiceData) {
 /**
  * Draw items table
  */
-function drawItemsTable(doc, invoiceData) {
+function drawItemsTable(doc, invoiceData, defaultFont, boldFont) {
   let y = 300;
   
   // Table headers
   doc.fontSize(10)
-     .font('DejaVu-Bold')
+     .font(boldFont)
      .fillColor(COLORS.darkGray);
   
   // Header background
@@ -353,6 +369,7 @@ function drawItemsTable(doc, invoiceData) {
   
   // Header text
   doc.fillColor(COLORS.darkGray)
+     .font(defaultFont)
      .text('Položka / Tétel', 55, y + 6)
      .text('Mn. / Mny.', 300, y + 6)
      .text('Jedn. cena / Egységár', 350, y + 6)
@@ -361,7 +378,7 @@ function drawItemsTable(doc, invoiceData) {
   y += 25;
   
   // Items
-  doc.font('DejaVu').fontSize(9);
+  doc.font(defaultFont).fontSize(9);
   
   const items = invoiceData.orderItems || [];
   
@@ -421,7 +438,7 @@ function drawItemsTable(doc, invoiceData) {
 /**
  * Draw totals section
  */
-function drawTotals(doc, invoiceData, startY) {
+function drawTotals(doc, invoiceData, startY, defaultFont, boldFont) {
   let y = Math.max(startY, 500);
   
   const breakdown = calculateVATBreakdown(invoiceData.totalGross);
@@ -435,6 +452,7 @@ function drawTotals(doc, invoiceData, startY) {
   // Subtotal
   doc.fontSize(10)
      .fillColor(COLORS.darkGray)
+     .font(defaultFont)
      .text('Medzisúčet / Részösszeg:', 310, y)
      .text(formatCurrency(invoiceData.subtotal || breakdown.netAmount), 480, y, { align: 'right' });
   
@@ -466,7 +484,7 @@ function drawTotals(doc, invoiceData, startY) {
   // Final total
   y += 10;
   doc.fontSize(12)
-     .font('DejaVu-Bold')
+     .font(boldFont)
      .fillColor(COLORS.rusticRed)
      .text('CELKOM / VÉGÖSSZEG:', 310, y)
      .text(formatCurrency(invoiceData.totalGross), 480, y, { align: 'right' });
@@ -475,7 +493,7 @@ function drawTotals(doc, invoiceData, startY) {
 /**
  * Draw footer with payment info
  */
-function drawFooter(doc, invoiceData) {
+function drawFooter(doc, invoiceData, defaultFont, boldFont) {
   let y = 650;
   
   // Payment method
@@ -486,17 +504,17 @@ function drawFooter(doc, invoiceData) {
   };
   
   doc.fontSize(10)
-     .font('DejaVu-Bold')
+     .font(boldFont)
      .fillColor(COLORS.eucalyptusGreen)
      .text('Spôsob platby / Fizetési mód:', 50, y);
   
-  doc.font('DejaVu')
+  doc.font(defaultFont)
      .fillColor(COLORS.darkGray)
      .text(paymentMethods[invoiceData.paymentMethod] || invoiceData.paymentMethod, 200, y);
   
   // Payment status
   y += 15;
-  doc.font('DejaVu-Bold')
+  doc.font(boldFont)
      .fillColor(COLORS.rusticRed)
      .text('UHRADENÉ / KIFIZETVE', 50, y);
   
@@ -504,6 +522,7 @@ function drawFooter(doc, invoiceData) {
   y += 40;
   doc.fontSize(8)
      .fillColor(COLORS.lightGray)
+     .font(defaultFont)
      .text('Ďakujeme za vašu návštevu! / Köszönjük a látogatást!', 50, y)
      .text('Palace Cafe & Street Food - Autentické chute od 2016', 50, y + 12);
 }
