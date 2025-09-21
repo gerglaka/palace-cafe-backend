@@ -3491,131 +3491,252 @@ app.patch('/api/admin/menu/items/:id/restore', authenticateAdmin, asyncHandler(a
 // ADMIN INVOICE MANAGEMENT APIs
 // ============================================
 
-// Get all invoices with filtering and pagination
-app.get('/api/admin/invoices', authenticateAdmin, asyncHandler(async (req, res) => {
-  const { 
-    page = 1, 
-    limit = 20, 
-    paymentMethod, 
-    month, 
-    year = new Date().getFullYear(),
-    search 
-  } = req.query;
-
-  console.log(`📋 Admin requesting invoices - Page: ${page}, Payment: ${paymentMethod}`);
-
+// Get invoice overview statistics
+app.get('/api/admin/invoices/overview', authenticateAdmin, asyncHandler(async (req, res) => {
+  console.log('📊 Loading invoice overview statistics...');
+  
   try {
-    // Build filter conditions
-    const where = {};
-    
-    if (paymentMethod && paymentMethod !== 'ALL') {
-      where.paymentMethod = paymentMethod;
-    }
-    
-    // Date filtering
-    if (month && year) {
-      const startDate = new Date(year, month - 1, 1);
-      const endDate = new Date(year, month, 0, 23, 59, 59);
-      where.createdAt = {
-        gte: startDate,
-        lte: endDate
-      };
-    } else if (year) {
-      const startDate = new Date(year, 0, 1);
-      const endDate = new Date(year, 11, 31, 23, 59, 59);
-      where.createdAt = {
-        gte: startDate,
-        lte: endDate
-      };
-    }
-    
-    // Search by customer name or invoice number
-    if (search) {
-      where.OR = [
-        { customerName: { contains: search, mode: 'insensitive' } },
-        { invoiceNumber: { contains: search, mode: 'insensitive' } }
-      ];
-    }
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    // Get total count for pagination
-    const totalCount = await prisma.invoice.count({ where });
-    
-    // Get invoices with pagination
-    const invoices = await prisma.invoice.findMany({
-      where,
-      include: {
-        order: {
-          select: {
-            orderNumber: true,
-            orderType: true,
-            status: true
-          }
+    // Today's statistics
+    const todayStats = await prisma.invoice.aggregate({
+      where: {
+        createdAt: {
+          gte: startOfDay
         }
       },
-      orderBy: { createdAt: 'desc' },
-      skip: (parseInt(page) - 1) * parseInt(limit),
-      take: parseInt(limit)
-    });
-
-    // Calculate summary stats for the filtered results
-    const summaryStats = await prisma.invoice.aggregate({
-      where,
       _sum: {
-        totalGross: true,
-        totalNet: true,
-        vatAmount: true
+        totalGross: true
       },
       _count: true
     });
 
-    console.log(`✅ Retrieved ${invoices.length} invoices`);
+    // Monthly statistics
+    const monthlyStats = await prisma.invoice.aggregate({
+      where: {
+        createdAt: {
+          gte: startOfMonth
+        }
+      },
+      _sum: {
+        totalGross: true
+      },
+      _count: true
+    });
+
+    // Payment method breakdown for current month
+    const paymentBreakdown = await prisma.invoice.groupBy({
+      by: ['paymentMethod'],
+      where: {
+        createdAt: {
+          gte: startOfMonth
+        }
+      },
+      _count: true
+    });
+
+    const paymentStats = {};
+    paymentBreakdown.forEach(item => {
+      paymentStats[item.paymentMethod] = item._count;
+    });
+
+    const overviewData = {
+      todayInvoices: todayStats._count || 0,
+      todayRevenue: todayStats._sum.totalGross || 0,
+      monthlyInvoices: monthlyStats._count || 0,
+      monthlyRevenue: monthlyStats._sum.totalGross || 0,
+      paymentBreakdown: paymentStats
+    };
+
+    console.log('✅ Invoice overview loaded');
+
+    res.json({
+      success: true,
+      data: overviewData
+    });
+
+  } catch (error) {
+    console.error('❌ Error loading invoice overview:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to load invoice overview'
+    });
+  }
+}));
+
+// Get invoices with filtering, searching, and pagination
+app.get('/api/admin/invoices', authenticateAdmin, asyncHandler(async (req, res) => {
+  console.log('📋 Loading invoices with filters...');
+  
+  try {
+    const {
+      page = 1,
+      limit = 20,
+      search = '',
+      dateRange = 'month',
+      paymentMethod = 'all',
+      orderType = 'all',
+      startDate,
+      endDate,
+      sortBy = 'createdAt',
+      sortOrder = 'desc'
+    } = req.query;
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    // Build where clause
+    let whereClause = {};
+
+    // Date filtering
+    const now = new Date();
+    let dateFilter = {};
+
+    switch (dateRange) {
+      case 'today':
+        dateFilter = {
+          gte: new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        };
+        break;
+      case 'week':
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - now.getDay());
+        weekStart.setHours(0, 0, 0, 0);
+        dateFilter = { gte: weekStart };
+        break;
+      case 'month':
+        dateFilter = {
+          gte: new Date(now.getFullYear(), now.getMonth(), 1)
+        };
+        break;
+      case 'year':
+        dateFilter = {
+          gte: new Date(now.getFullYear(), 0, 1)
+        };
+        break;
+      case 'custom':
+        if (startDate && endDate) {
+          dateFilter = {
+            gte: new Date(startDate),
+            lte: new Date(new Date(endDate).setHours(23, 59, 59, 999))
+          };
+        }
+        break;
+    }
+
+    if (Object.keys(dateFilter).length > 0) {
+      whereClause.createdAt = dateFilter;
+    }
+
+    // Payment method filtering
+    if (paymentMethod !== 'all') {
+      whereClause.paymentMethod = paymentMethod;
+    }
+
+    // Order type filtering
+    if (orderType !== 'all') {
+      whereClause.orderType = orderType;
+    }
+
+    // Search functionality
+    if (search) {
+      whereClause.OR = [
+        {
+          invoiceNumber: {
+            contains: search,
+            mode: 'insensitive'
+          }
+        },
+        {
+          customerName: {
+            contains: search,
+            mode: 'insensitive'
+          }
+        },
+        {
+          customerEmail: {
+            contains: search,
+            mode: 'insensitive'
+          }
+        }
+      ];
+    }
+
+    // Build order clause
+    const validSortFields = ['createdAt', 'invoiceNumber', 'customerName', 'totalGross'];
+    const orderBy = validSortFields.includes(sortBy) 
+      ? { [sortBy]: sortOrder === 'desc' ? 'desc' : 'asc' }
+      : { createdAt: 'desc' };
+
+    // Get total count for pagination
+    const totalCount = await prisma.invoice.count({ where: whereClause });
+
+    // Get invoices
+    const invoices = await prisma.invoice.findMany({
+      where: whereClause,
+      orderBy: orderBy,
+      skip: skip,
+      take: parseInt(limit),
+      include: {
+        order: {
+          select: {
+            id: true,
+            orderNumber: true,
+            orderType: true
+          }
+        }
+      }
+    });
+
+    console.log(`✅ Found ${invoices.length} invoices (${totalCount} total)`);
+
+    const processedInvoices = invoices.map(invoice => ({
+      id: invoice.id,
+      invoiceNumber: invoice.invoiceNumber,
+      customerName: invoice.customerName,
+      customerEmail: invoice.customerEmail,
+      customerPhone: invoice.customerPhone,
+      customerAddress: invoice.customerAddress,
+      paymentMethod: invoice.paymentMethod,
+      orderType: invoice.orderType || invoice.order?.orderType,
+      totalNet: invoice.totalNet,
+      totalVat: invoice.vatAmount,
+      totalGross: invoice.totalGross,
+      vatRate: invoice.vatRate || 27,
+      createdAt: invoice.createdAt,
+      dueDate: invoice.dueDate,
+      orderId: invoice.order?.id,
+      orderNumber: invoice.order?.orderNumber
+    }));
 
     res.json({
       success: true,
       data: {
-        invoices: invoices.map(invoice => ({
-          id: invoice.id,
-          invoiceNumber: invoice.invoiceNumber,
-          customerName: invoice.customerName,
-          customerEmail: invoice.customerEmail,
-          paymentMethod: invoice.paymentMethod,
-          totalGross: invoice.totalGross,
-          totalNet: invoice.totalNet,
-          vatAmount: invoice.vatAmount,
-          emailSent: invoice.emailSent,
-          createdAt: invoice.createdAt,
-          order: invoice.order
-        })),
+        invoices: processedInvoices,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
           total: totalCount,
           pages: Math.ceil(totalCount / parseInt(limit))
-        },
-        summary: {
-          count: summaryStats._count,
-          totalRevenue: summaryStats._sum.totalGross || 0,
-          totalNet: summaryStats._sum.totalNet || 0,
-          totalVAT: summaryStats._sum.vatAmount || 0
         }
       }
     });
 
   } catch (error) {
-    console.error('❌ Failed to fetch invoices:', error);
+    console.error('❌ Error loading invoices:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch invoices'
+      error: 'Failed to load invoices'
     });
   }
 }));
 
-// Download specific invoice PDF
-app.get('/api/admin/invoices/:id/pdf', authenticateAdmin, asyncHandler(async (req, res) => {
+// Get single invoice details
+app.get('/api/admin/invoices/:id', authenticateAdmin, asyncHandler(async (req, res) => {
   const { id } = req.params;
+  console.log(`📄 Loading invoice details for ID: ${id}`);
   
-  console.log(`📄 Admin requesting PDF for invoice ID: ${id}`);
-
   try {
     const invoice = await prisma.invoice.findUnique({
       where: { id: parseInt(id) },
@@ -3626,7 +3747,107 @@ app.get('/api/admin/invoices/:id/pdf', authenticateAdmin, asyncHandler(async (re
               include: {
                 menuItem: {
                   include: {
-                    translations: { where: { language: 'hu' } }
+                    translations: {
+                      where: { language: 'hu' }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        error: 'Invoice not found'
+      });
+    }
+
+    // Process invoice items - try from stored orderItems first, then from order relation
+    let invoiceItems = [];
+    
+    if (invoice.orderItems && Array.isArray(invoice.orderItems)) {
+      // Use stored orderItems (JSON field)
+      invoiceItems = invoice.orderItems.map(item => ({
+        name: item.name,
+        quantity: item.quantity,
+        price: item.unitPrice,
+        totalPrice: item.totalPrice,
+        customizations: item.customizations ? [{ name: item.customizations }] : []
+      }));
+    } else if (invoice.order?.items) {
+      // Fallback to order items relation
+      invoiceItems = invoice.order.items.map(item => ({
+        name: item.menuItem.translations[0]?.name || 'Unknown Item',
+        quantity: item.quantity,
+        price: item.totalPrice / item.quantity,
+        totalPrice: item.totalPrice,
+        customizations: [
+          ...(item.selectedSauce ? [{ name: item.selectedSauce }] : []),
+          ...(item.friesUpgrade ? [{ name: item.friesUpgrade }] : []),
+          ...(item.extras || []).map(extra => ({ name: extra })),
+          ...(item.specialNotes ? [{ name: `Note: ${item.specialNotes}` }] : [])
+        ].filter(c => c.name)
+      }));
+    }
+
+    const invoiceDetails = {
+      id: invoice.id,
+      invoiceNumber: invoice.invoiceNumber,
+      customerName: invoice.customerName,
+      customerEmail: invoice.customerEmail,
+      customerPhone: invoice.customerPhone,
+      customerAddress: invoice.customerAddress,
+      paymentMethod: invoice.paymentMethod,
+      orderType: invoice.orderType || invoice.order?.orderType,
+      totalNet: invoice.totalNet,
+      totalVat: invoice.vatAmount,
+      totalGross: invoice.totalGross,
+      vatRate: invoice.vatRate || 27,
+      createdAt: invoice.createdAt,
+      dueDate: invoice.dueDate,
+      orderId: invoice.order?.id,
+      orderNumber: invoice.order?.orderNumber,
+      items: invoiceItems
+    };
+
+    console.log('✅ Invoice details loaded successfully');
+
+    res.json({
+      success: true,
+      data: invoiceDetails
+    });
+
+  } catch (error) {
+    console.error('❌ Error loading invoice details:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to load invoice details'
+    });
+  }
+}));
+
+// Download invoice PDF
+app.get('/api/admin/invoices/:id/pdf', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  console.log(`📄 Generating PDF for invoice ID: ${id}`);
+  
+  try {
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: parseInt(id) },
+      include: {
+        order: {
+          include: {
+            items: {
+              include: {
+                menuItem: {
+                  include: {
+                    translations: {
+                      where: { language: 'hu' }
+                    }
                   }
                 }
               }
@@ -3645,7 +3866,7 @@ app.get('/api/admin/invoices/:id/pdf', authenticateAdmin, asyncHandler(async (re
 
     console.log(`📋 Generating PDF for invoice ${invoice.invoiceNumber}`);
 
-    // Generate PDF from stored data
+    // Generate PDF from stored data using your existing generator
     const pdfBuffer = await generateInvoicePDF({
       ...invoice,
       orderItems: invoice.orderItems // This is stored as JSON
@@ -3668,12 +3889,12 @@ app.get('/api/admin/invoices/:id/pdf', authenticateAdmin, asyncHandler(async (re
   }
 }));
 
-// Resend invoice email
-app.post('/api/admin/invoices/:id/resend-email', authenticateAdmin, asyncHandler(async (req, res) => {
+// Send invoice email
+app.post('/api/admin/invoices/:id/email', authenticateAdmin, asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { email } = req.body; // Optional: send to different email
   
-  console.log(`📧 Admin requesting email resend for invoice ID: ${id}`);
+  console.log(`📧 Sending invoice email for ID: ${id}`);
 
   try {
     const invoice = await prisma.invoice.findUnique({
@@ -3717,7 +3938,7 @@ app.post('/api/admin/invoices/:id/resend-email', authenticateAdmin, asyncHandler
         }
       });
 
-      console.log(`✅ Invoice email resent to ${targetEmail}`);
+      console.log(`✅ Invoice email sent to ${targetEmail}`);
       res.json({
         success: true,
         message: `Invoice email sent to ${targetEmail}`
@@ -3738,28 +3959,172 @@ app.post('/api/admin/invoices/:id/resend-email', authenticateAdmin, asyncHandler
     }
 
   } catch (error) {
-    console.error('❌ Failed to resend invoice email:', error);
+    console.error('❌ Failed to send invoice email:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to resend email'
+      error: 'Failed to send email'
     });
   }
 }));
 
-// Generate monthly invoice report (Excel export)
-app.get('/api/admin/invoices/export/monthly', authenticateAdmin, asyncHandler(async (req, res) => {
-  const { month, year = new Date().getFullYear(), format = 'json' } = req.query;
-
-  console.log(`📊 Admin requesting monthly report - ${month}/${year}`);
+// Bulk download invoices
+app.post('/api/admin/invoices/bulk-download', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { invoiceIds } = req.body;
+  
+  console.log(`📦 Bulk download requested for ${invoiceIds?.length} invoices`);
 
   try {
+    if (!invoiceIds || !Array.isArray(invoiceIds) || invoiceIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invoice IDs are required'
+      });
+    }
+
+    const invoices = await prisma.invoice.findMany({
+      where: {
+        id: {
+          in: invoiceIds.map(id => parseInt(id))
+        }
+      }
+    });
+
+    if (invoices.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'No invoices found'
+      });
+    }
+
+    // For simplicity, return a download URL that triggers individual downloads
+    // In a production system, you'd create a ZIP file
+    console.log(`✅ Bulk download prepared for ${invoices.length} invoices`);
+    
+    res.json({
+      success: true,
+      data: {
+        downloadUrl: `/api/admin/invoices/bulk-download-zip?ids=${invoiceIds.join(',')}`,
+        invoiceCount: invoices.length
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to prepare bulk download:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to prepare bulk download'
+    });
+  }
+}));
+
+// Bulk email invoices
+app.post('/api/admin/invoices/bulk-email', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { invoiceIds } = req.body;
+  
+  console.log(`📧 Bulk email requested for ${invoiceIds?.length} invoices`);
+
+  try {
+    if (!invoiceIds || !Array.isArray(invoiceIds) || invoiceIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invoice IDs are required'
+      });
+    }
+
+    const invoices = await prisma.invoice.findMany({
+      where: {
+        id: {
+          in: invoiceIds.map(id => parseInt(id))
+        },
+        customerEmail: {
+          not: null
+        }
+      }
+    });
+
+    if (invoices.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'No invoices with email addresses found'
+      });
+    }
+
+    let successCount = 0;
+    let failCount = 0;
+
+    // Send emails sequentially to avoid overwhelming the email service
+    for (const invoice of invoices) {
+      try {
+        const pdfBuffer = await generateInvoicePDF({
+          ...invoice,
+          orderItems: invoice.orderItems
+        });
+
+        const emailResult = await sendInvoiceEmail(invoice, pdfBuffer, invoice.customerEmail);
+
+        if (emailResult.success) {
+          successCount++;
+          await prisma.invoice.update({
+            where: { id: invoice.id },
+            data: {
+              emailSent: true,
+              emailSentAt: new Date(),
+              emailAttempts: (invoice.emailAttempts || 0) + 1
+            }
+          });
+        } else {
+          failCount++;
+          await prisma.invoice.update({
+            where: { id: invoice.id },
+            data: {
+              emailAttempts: (invoice.emailAttempts || 0) + 1
+            }
+          });
+        }
+      } catch (emailError) {
+        console.error(`Failed to send email for invoice ${invoice.invoiceNumber}:`, emailError);
+        failCount++;
+      }
+    }
+
+    console.log(`✅ Bulk email completed: ${successCount} sent, ${failCount} failed`);
+
+    res.json({
+      success: true,
+      data: {
+        totalProcessed: invoices.length,
+        successCount,
+        failCount,
+        message: `${successCount} emails sent successfully${failCount > 0 ? `, ${failCount} failed` : ''}`
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to send bulk emails:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to send bulk emails'
+    });
+  }
+}));
+
+// Export monthly report
+app.get('/api/admin/invoices/export/monthly', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { month, year = new Date().getFullYear() } = req.query;
+
+  console.log(`📊 Monthly export requested - ${month}/${year}`);
+
+  try {
+    if (!month || !year) {
+      return res.status(400).json({
+        success: false,
+        error: 'Month and year are required'
+      });
+    }
+
     // Date range
-    const startDate = month 
-      ? new Date(year, month - 1, 1) 
-      : new Date(year, 0, 1);
-    const endDate = month 
-      ? new Date(year, month, 0, 23, 59, 59)
-      : new Date(year, 11, 31, 23, 59, 59);
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0, 23, 59, 59);
 
     // Get invoices for the period
     const invoices = await prisma.invoice.findMany({
@@ -3780,62 +4145,240 @@ app.get('/api/admin/invoices/export/monthly', authenticateAdmin, asyncHandler(as
       orderBy: { createdAt: 'asc' }
     });
 
-    // Calculate summary by payment method
-    const cashInvoices = invoices.filter(inv => inv.paymentMethod === 'CASH');
-    const cardInvoices = invoices.filter(inv => inv.paymentMethod === 'CARD' || inv.paymentMethod === 'ONLINE');
+    // Create Excel-like data structure
+    const excelData = {
+      headers: [
+        'Invoice Number',
+        'Date',
+        'Customer Name',
+        'Order Number',
+        'Payment Method',
+        'Order Type',
+        'Net Amount',
+        'VAT Amount',
+        'Gross Amount'
+      ],
+      rows: invoices.map(invoice => [
+        invoice.invoiceNumber,
+        invoice.createdAt.toISOString().split('T')[0],
+        invoice.customerName,
+        invoice.order?.orderNumber || '',
+        invoice.paymentMethod,
+        invoice.orderType || invoice.order?.orderType || '',
+        invoice.totalNet,
+        invoice.vatAmount,
+        invoice.totalGross
+      ]),
+      summary: {
+        totalInvoices: invoices.length,
+        totalNet: invoices.reduce((sum, inv) => sum + inv.totalNet, 0),
+        totalVAT: invoices.reduce((sum, inv) => sum + inv.vatAmount, 0),
+        totalGross: invoices.reduce((sum, inv) => sum + inv.totalGross, 0),
+        paymentMethodBreakdown: invoices.reduce((acc, inv) => {
+          acc[inv.paymentMethod] = (acc[inv.paymentMethod] || 0) + inv.totalGross;
+          return acc;
+        }, {})
+      }
+    };
 
-    const summary = {
-      period: month ? `${month}/${year}` : year.toString(),
-      cash: {
-        count: cashInvoices.length,
-        totalNet: cashInvoices.reduce((sum, inv) => sum + inv.totalNet, 0),
-        totalVAT: cashInvoices.reduce((sum, inv) => sum + inv.vatAmount, 0),
-        totalGross: cashInvoices.reduce((sum, inv) => sum + inv.totalGross, 0),
-        invoices: cashInvoices.map(inv => ({
-          invoiceNumber: inv.invoiceNumber,
-          date: inv.createdAt,
-          customer: inv.customerName,
-          orderNumber: inv.order?.orderNumber,
-          net: inv.totalNet,
-          vat: inv.vatAmount,
-          gross: inv.totalGross
-        }))
+    // In a real implementation, you'd use a library like xlsx to create an actual Excel file
+    // For now, we'll return JSON that the frontend can process
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="monthly-report-${year}-${month.toString().padStart(2, '0')}.json"`);
+
+    console.log(`✅ Monthly export generated - ${invoices.length} invoices`);
+
+    res.json({
+      success: true,
+      data: excelData
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to generate monthly export:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate monthly export'
+    });
+  }
+}));
+
+// Generate VAT report
+app.get('/api/admin/invoices/vat-report', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { month, year = new Date().getFullYear() } = req.query;
+
+  console.log(`📊 VAT report requested - ${month}/${year}`);
+
+  try {
+    if (!month || !year) {
+      return res.status(400).json({
+        success: false,
+        error: 'Month and year are required'
+      });
+    }
+
+    // Date range
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0, 23, 59, 59);
+
+    // Get VAT statistics
+    const vatStats = await prisma.invoice.aggregate({
+      where: {
+        createdAt: {
+          gte: startDate,
+          lte: endDate
+        }
       },
-      card: {
-        count: cardInvoices.length,
-        totalNet: cardInvoices.reduce((sum, inv) => sum + inv.totalNet, 0),
-        totalVAT: cardInvoices.reduce((sum, inv) => sum + inv.vatAmount, 0),
-        totalGross: cardInvoices.reduce((sum, inv) => sum + inv.totalGross, 0),
-        invoices: cardInvoices.map(inv => ({
-          invoiceNumber: inv.invoiceNumber,
-          date: inv.createdAt,
-          customer: inv.customerName,
-          orderNumber: inv.order?.orderNumber,
-          net: inv.totalNet,
-          vat: inv.vatAmount,
-          gross: inv.totalGross
-        }))
+      _sum: {
+        totalNet: true,
+        vatAmount: true,
+        totalGross: true
       },
-      totals: {
-        count: invoices.length,
+      _count: true
+    });
+
+    // Group by VAT rate
+    const vatByRate = await prisma.invoice.groupBy({
+      by: ['vatRate'],
+      where: {
+        createdAt: {
+          gte: startDate,
+          lte: endDate
+        }
+      },
+      _sum: {
+        totalNet: true,
+        vatAmount: true,
+        totalGross: true
+      },
+      _count: true
+    });
+
+    const vatReport = {
+      period: `${month}/${year}`,
+      summary: {
+        totalInvoices: vatStats._count,
+        totalNet: vatStats._sum.totalNet || 0,
+        totalVAT: vatStats._sum.vatAmount || 0,
+        totalGross: vatStats._sum.totalGross || 0
+      },
+      vatBreakdown: vatByRate.map(rate => ({
+        vatRate: rate.vatRate || 27,
+        invoiceCount: rate._count,
+        netAmount: rate._sum.totalNet || 0,
+        vatAmount: rate._sum.vatAmount || 0,
+        grossAmount: rate._sum.totalGross || 0
+      }))
+    };
+
+    // In a real implementation, you'd generate a PDF report
+    // For now, return JSON data
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="vat-report-${year}-${month.toString().padStart(2, '0')}.json"`);
+
+    console.log(`✅ VAT report generated`);
+
+    res.json({
+      success: true,
+      data: vatReport
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to generate VAT report:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate VAT report'
+    });
+  }
+}));
+
+// Export custom date range
+app.get('/api/admin/invoices/export/custom', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { startDate, endDate } = req.query;
+
+  console.log(`📊 Custom export requested - ${startDate} to ${endDate}`);
+
+  try {
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'Start date and end date are required'
+      });
+    }
+
+    // Date range
+    const start = new Date(startDate);
+    const end = new Date(new Date(endDate).setHours(23, 59, 59, 999));
+
+    // Get invoices for the period
+    const invoices = await prisma.invoice.findMany({
+      where: {
+        createdAt: {
+          gte: start,
+          lte: end
+        }
+      },
+      include: {
+        order: {
+          select: {
+            orderNumber: true,
+            orderType: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    // Create export data
+    const exportData = {
+      dateRange: {
+        start: startDate,
+        end: endDate
+      },
+      headers: [
+        'Invoice Number',
+        'Date',
+        'Customer Name',
+        'Order Number',
+        'Payment Method',
+        'Order Type',
+        'Net Amount',
+        'VAT Amount',
+        'Gross Amount'
+      ],
+      rows: invoices.map(invoice => [
+        invoice.invoiceNumber,
+        invoice.createdAt.toISOString().split('T')[0],
+        invoice.customerName,
+        invoice.order?.orderNumber || '',
+        invoice.paymentMethod,
+        invoice.orderType || invoice.order?.orderType || '',
+        invoice.totalNet,
+        invoice.vatAmount,
+        invoice.totalGross
+      ]),
+      summary: {
+        totalInvoices: invoices.length,
         totalNet: invoices.reduce((sum, inv) => sum + inv.totalNet, 0),
         totalVAT: invoices.reduce((sum, inv) => sum + inv.vatAmount, 0),
         totalGross: invoices.reduce((sum, inv) => sum + inv.totalGross, 0)
       }
     };
 
-    console.log(`✅ Monthly report generated - ${invoices.length} invoices`);
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="custom-export-${startDate}-${endDate}.json"`);
+
+    console.log(`✅ Custom export generated - ${invoices.length} invoices`);
 
     res.json({
       success: true,
-      data: summary
+      data: exportData
     });
 
   } catch (error) {
-    console.error('❌ Failed to generate monthly report:', error);
+    console.error('❌ Failed to generate custom export:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to generate monthly report'
+      error: 'Failed to generate custom export'
     });
   }
 }));
@@ -3947,6 +4490,8 @@ app.post('/api/admin/email/send-test', authenticateAdmin, asyncHandler(async (re
     });
   }
 }));
+
+
 
 
 // ============================================
