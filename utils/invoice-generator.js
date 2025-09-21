@@ -1,12 +1,12 @@
 /**
- * Palace Cafe & Street Food - React-PDF Invoice Generator
- * No browser dependencies, excellent UTF-8 support
+ * Palace Cafe & Street Food - React-PDF Invoice Generator (No JSX)
+ * Pure JavaScript React elements, no transpilation needed
  * Uses your exact VAT calculation: VAT = GROSS * 0.19, NET = GROSS - VAT
  * Slovak language only
  */
 
 const React = require('react');
-const { Document, Page, Text, View, StyleSheet, pdf, Font } = require('@react-pdf/renderer');
+const { Document, Page, Text, View, StyleSheet, pdf } = require('@react-pdf/renderer');
 
 // Company details
 const COMPANY_INFO = {
@@ -273,8 +273,10 @@ const styles = StyleSheet.create({
   }
 });
 
-// React-PDF Document Component
-const InvoiceDocument = ({ invoiceData }) => {
+/**
+ * Create React-PDF Document using React.createElement (no JSX)
+ */
+function createInvoiceDocument(invoiceData) {
   const vatBreakdown = calculateVATBreakdown(invoiceData.totalGross);
   
   // Payment method translations
@@ -284,157 +286,148 @@ const InvoiceDocument = ({ invoiceData }) => {
     'ONLINE': 'Online platba'
   };
 
-  return (
-    <Document>
-      <Page size="A4" style={styles.page}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.companyName}>{COMPANY_INFO.name}</Text>
-          <View>
-            <Text style={styles.invoiceTitle}>FAKTÚRA</Text>
-            <Text style={styles.invoiceSubtitle}>Daňový doklad</Text>
-          </View>
-        </View>
+  return React.createElement(Document, null,
+    React.createElement(Page, { size: "A4", style: styles.page },
+      
+      // Header
+      React.createElement(View, { style: styles.header },
+        React.createElement(Text, { style: styles.companyName }, COMPANY_INFO.name),
+        React.createElement(View, null,
+          React.createElement(Text, { style: styles.invoiceTitle }, "FAKTÚRA"),
+          React.createElement(Text, { style: styles.invoiceSubtitle }, "Daňový doklad")
+        )
+      ),
 
-        {/* Invoice Details */}
-        <View style={styles.invoiceDetails}>
-          <Text style={styles.invoiceNumber}>
-            Číslo faktúry: {invoiceData.invoiceNumber}
-          </Text>
-          <Text style={styles.invoiceDetail}>
-            Dátum vystavenia: {formatDate(invoiceData.createdAt)}
-          </Text>
-          <Text style={styles.invoiceDetail}>
-            Dátum splatnosti: {formatDate(invoiceData.createdAt)}
-          </Text>
-          <Text style={styles.invoiceDetail}>
-            Číslo objednávky: #{invoiceData.order?.orderNumber || 'N/A'}
-          </Text>
-        </View>
+      // Invoice Details
+      React.createElement(View, { style: styles.invoiceDetails },
+        React.createElement(Text, { style: styles.invoiceNumber }, 
+          `Číslo faktúry: ${invoiceData.invoiceNumber}`
+        ),
+        React.createElement(Text, { style: styles.invoiceDetail }, 
+          `Dátum vystavenia: ${formatDate(invoiceData.createdAt)}`
+        ),
+        React.createElement(Text, { style: styles.invoiceDetail }, 
+          `Dátum splatnosti: ${formatDate(invoiceData.createdAt)}`
+        ),
+        React.createElement(Text, { style: styles.invoiceDetail }, 
+          `Číslo objednávky: #${invoiceData.order?.orderNumber || 'N/A'}`
+        )
+      ),
 
-        {/* Company and Customer Info */}
-        <View style={styles.infoSection}>
-          <View style={styles.infoBlock}>
-            <Text style={styles.infoTitle}>Dodávateľ</Text>
-            <View style={styles.infoContent}>
-              <Text style={{ fontWeight: 'bold' }}>{COMPANY_INFO.name}</Text>
-              <Text>{COMPANY_INFO.address}</Text>
-              <Text>{COMPANY_INFO.city}</Text>
-              <Text>{'\n'}</Text>
-              <Text>IČO: {COMPANY_INFO.ico}</Text>
-              <Text>DIČ: {COMPANY_INFO.dic}</Text>
-              <Text>IČ DPH: {COMPANY_INFO.vatNumber}</Text>
-            </View>
-          </View>
+      // Company and Customer Info
+      React.createElement(View, { style: styles.infoSection },
+        React.createElement(View, { style: styles.infoBlock },
+          React.createElement(Text, { style: styles.infoTitle }, "Dodávateľ"),
+          React.createElement(View, { style: styles.infoContent },
+            React.createElement(Text, { style: { fontWeight: 'bold' } }, COMPANY_INFO.name),
+            React.createElement(Text, null, COMPANY_INFO.address),
+            React.createElement(Text, null, COMPANY_INFO.city),
+            React.createElement(Text, null, "\n"),
+            React.createElement(Text, null, `IČO: ${COMPANY_INFO.ico}`),
+            React.createElement(Text, null, `DIČ: ${COMPANY_INFO.dic}`),
+            React.createElement(Text, null, `IČ DPH: ${COMPANY_INFO.vatNumber}`)
+          )
+        ),
+        
+        React.createElement(View, { style: styles.infoBlock },
+          React.createElement(Text, { style: styles.infoTitle }, "Odberateľ"),
+          React.createElement(View, { style: styles.infoContent },
+            React.createElement(Text, { style: { fontWeight: 'bold' } }, 
+              invoiceData.customerName || 'Zákazník'
+            ),
+            invoiceData.customerPhone && 
+              React.createElement(Text, null, `Tel: ${invoiceData.customerPhone}`),
+            invoiceData.customerEmail && 
+              React.createElement(Text, null, `Email: ${invoiceData.customerEmail}`)
+          )
+        )
+      ),
+
+      // Items Table
+      React.createElement(View, { style: styles.table },
+        // Table Header
+        React.createElement(View, { style: styles.tableHeader },
+          React.createElement(Text, { style: styles.col1 }, "Položka"),
+          React.createElement(Text, { style: styles.col2 }, "Mn."),
+          React.createElement(Text, { style: styles.col3 }, "Jedn. cena"),
+          React.createElement(Text, { style: styles.col4 }, "Spolu")
+        ),
+        
+        // Table Rows
+        ...(invoiceData.orderItems || []).map((item, index) =>
+          React.createElement(View, { 
+            key: index, 
+            style: [styles.tableRow, index % 2 === 0 ? styles.tableRowEven : {}]
+          },
+            React.createElement(View, { style: styles.col1 },
+              React.createElement(Text, { style: styles.itemName }, 
+                item.name || 'Unknown Item'
+              ),
+              item.customizations && 
+                React.createElement(Text, { style: styles.itemCustomizations }, 
+                  `• ${item.customizations}`
+                )
+            ),
+            React.createElement(Text, { style: styles.col2 }, (item.quantity || 1).toString()),
+            React.createElement(Text, { style: styles.col3 }, 
+              formatCurrency(item.unitPrice || item.price || 0)
+            ),
+            React.createElement(Text, { style: styles.col4 }, 
+              formatCurrency(item.totalPrice || 0)
+            )
+          )
+        )
+      ),
+
+      // Totals
+      React.createElement(View, { style: styles.totalsSection },
+        React.createElement(View, { style: styles.totalsTable },
+          React.createElement(View, { style: styles.totalsRow },
+            React.createElement(Text, null, "Medzisúčet:"),
+            React.createElement(Text, null, formatCurrency(invoiceData.subtotal || vatBreakdown.netAmount))
+          ),
           
-          <View style={styles.infoBlock}>
-            <Text style={styles.infoTitle}>Odberateľ</Text>
-            <View style={styles.infoContent}>
-              <Text style={{ fontWeight: 'bold' }}>
-                {invoiceData.customerName || 'Zákazník'}
-              </Text>
-              {invoiceData.customerPhone && (
-                <Text>Tel: {invoiceData.customerPhone}</Text>
-              )}
-              {invoiceData.customerEmail && (
-                <Text>Email: {invoiceData.customerEmail}</Text>
-              )}
-            </View>
-          </View>
-        </View>
-
-        {/* Items Table */}
-        <View style={styles.table}>
-          {/* Table Header */}
-          <View style={styles.tableHeader}>
-            <Text style={styles.col1}>Položka</Text>
-            <Text style={styles.col2}>Mn.</Text>
-            <Text style={styles.col3}>Jedn. cena</Text>
-            <Text style={styles.col4}>Spolu</Text>
-          </View>
+          invoiceData.deliveryFee && invoiceData.deliveryFee > 0 &&
+            React.createElement(View, { style: styles.totalsRow },
+              React.createElement(Text, null, "Poplatok za doručenie:"),
+              React.createElement(Text, null, formatCurrency(invoiceData.deliveryFee))
+            ),
           
-          {/* Table Rows */}
-          {(invoiceData.orderItems || []).map((item, index) => (
-            <View 
-              key={index} 
-              style={[
-                styles.tableRow, 
-                index % 2 === 0 ? styles.tableRowEven : {}
-              ]}
-            >
-              <View style={styles.col1}>
-                <Text style={styles.itemName}>
-                  {item.name || 'Unknown Item'}
-                </Text>
-                {item.customizations && (
-                  <Text style={styles.itemCustomizations}>
-                    • {item.customizations}
-                  </Text>
-                )}
-              </View>
-              <Text style={styles.col2}>{item.quantity || 1}</Text>
-              <Text style={styles.col3}>
-                {formatCurrency(item.unitPrice || item.price || 0)}
-              </Text>
-              <Text style={styles.col4}>
-                {formatCurrency(item.totalPrice || 0)}
-              </Text>
-            </View>
-          ))}
-        </View>
-
-        {/* Totals */}
-        <View style={styles.totalsSection}>
-          <View style={styles.totalsTable}>
-            <View style={styles.totalsRow}>
-              <Text>Medzisúčet:</Text>
-              <Text>{formatCurrency(invoiceData.subtotal || vatBreakdown.netAmount)}</Text>
-            </View>
-            
-            {invoiceData.deliveryFee && invoiceData.deliveryFee > 0 && (
-              <View style={styles.totalsRow}>
-                <Text>Poplatok za doručenie:</Text>
-                <Text>{formatCurrency(invoiceData.deliveryFee)}</Text>
-              </View>
-            )}
-            
-            <View style={styles.totalsRow}>
-              <Text>Základ DPH 19%:</Text>
-              <Text>{formatCurrency(vatBreakdown.netAmount)}</Text>
-            </View>
-            
-            <View style={styles.totalsRow}>
-              <Text>DPH 19%:</Text>
-              <Text>{formatCurrency(vatBreakdown.vatAmount)}</Text>
-            </View>
-            
-            <View style={[styles.totalsRow, styles.totalsRowFinal]}>
-              <Text>CELKOM:</Text>
-              <Text>{formatCurrency(invoiceData.totalGross)}</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Footer */}
-        <View style={styles.footer}>
-          <Text style={styles.paymentInfo}>
-            Spôsob platby: {' '}
-            <Text style={styles.paymentMethod}>
-              {paymentMethods[invoiceData.paymentMethod] || invoiceData.paymentMethod}
-            </Text>
-          </Text>
+          React.createElement(View, { style: styles.totalsRow },
+            React.createElement(Text, null, "Základ DPH 19%:"),
+            React.createElement(Text, null, formatCurrency(vatBreakdown.netAmount))
+          ),
           
-          <Text style={styles.paidStatus}>UHRADENÉ</Text>
+          React.createElement(View, { style: styles.totalsRow },
+            React.createElement(Text, null, "DPH 19%:"),
+            React.createElement(Text, null, formatCurrency(vatBreakdown.vatAmount))
+          ),
           
-          <Text style={styles.footerNote}>
-            Ďakujeme za vašu návštevu!{'\n'}
-            Palace Cafe & Street Food - Autentické chute od 2016
-          </Text>
-        </View>
-      </Page>
-    </Document>
+          React.createElement(View, { style: [styles.totalsRow, styles.totalsRowFinal] },
+            React.createElement(Text, null, "CELKOM:"),
+            React.createElement(Text, null, formatCurrency(invoiceData.totalGross))
+          )
+        )
+      ),
+
+      // Footer
+      React.createElement(View, { style: styles.footer },
+        React.createElement(Text, { style: styles.paymentInfo },
+          "Spôsob platby: ",
+          React.createElement(Text, { style: styles.paymentMethod },
+            paymentMethods[invoiceData.paymentMethod] || invoiceData.paymentMethod
+          )
+        ),
+        
+        React.createElement(Text, { style: styles.paidStatus }, "UHRADENÉ"),
+        
+        React.createElement(Text, { style: styles.footerNote },
+          "Ďakujeme za vašu návštevu!\nPalace Cafe & Street Food - Autentické chute od 2016"
+        )
+      )
+    )
   );
-};
+}
 
 /**
  * Generate invoice PDF using React-PDF
@@ -443,8 +436,8 @@ async function generateInvoicePDF(invoiceData) {
   try {
     console.log('🚀 Starting React-PDF invoice generation...');
     
-    // Create PDF document
-    const doc = <InvoiceDocument invoiceData={invoiceData} />;
+    // Create PDF document using React.createElement (no JSX)
+    const doc = createInvoiceDocument(invoiceData);
     
     // Generate PDF buffer
     const pdfBuffer = await pdf(doc).toBuffer();
