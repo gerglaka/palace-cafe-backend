@@ -178,6 +178,7 @@ function generateInvoicePDF(invoiceData) {
         size: 'A4', 
         margin: 50,
         bufferPages: true,
+        compress:false,
         info: {
           Title: `Faktúra ${invoiceData.invoiceNumber}`,
           Subject: 'Palace Cafe & Street Food - Faktúra',
