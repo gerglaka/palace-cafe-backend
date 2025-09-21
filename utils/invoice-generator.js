@@ -1,27 +1,12 @@
 /**
- * Palace Cafe & Street Food - PDFmake Invoice Generator
- * Reliable server-friendly PDF generation with proper UTF-8 support
+ * Palace Cafe & Street Food - React-PDF Invoice Generator
+ * No browser dependencies, excellent UTF-8 support
  * Uses your exact VAT calculation: VAT = GROSS * 0.19, NET = GROSS - VAT
  * Slovak language only
  */
 
-const pdfMake = require('pdfmake/build/pdfmake');
-
-// Try different font loading approaches
-try {
-  const pdfFonts = require('pdfmake/build/vfs_fonts');
-  pdfMake.vfs = pdfFonts.pdfMake.vfs;
-} catch (error) {
-  // Fallback font loading for different PDFmake versions
-  try {
-    const vfs_fonts = require('pdfmake/build/vfs_fonts');
-    pdfMake.vfs = vfs_fonts.vfs;
-  } catch (error2) {
-    console.warn('Could not load PDFmake fonts, using default fonts');
-    // Define minimal font structure
-    pdfMake.vfs = {};
-  }
-}
+const React = require('react');
+const { Document, Page, Text, View, StyleSheet, pdf, Font } = require('@react-pdf/renderer');
 
 // Company details
 const COMPANY_INFO = {
@@ -33,13 +18,14 @@ const COMPANY_INFO = {
   vatNumber: 'SK2122291578'
 };
 
-// Brand colors (PDFmake uses arrays for RGB)
+// Brand colors
 const COLORS = {
   rusticRed: '#38141A',
   eucalyptusGreen: '#1D665D',
   darkGray: '#333333',
   lightGray: '#666666',
-  veryLightGray: '#f5f5f5'
+  veryLightGray: '#f5f5f5',
+  white: '#ffffff'
 };
 
 /**
@@ -115,336 +101,361 @@ function formatDate(date) {
   return new Date(date).toLocaleDateString('sk-SK');
 }
 
+// Define styles for React-PDF
+const styles = StyleSheet.create({
+  page: {
+    backgroundColor: COLORS.white,
+    padding: 30,
+    fontFamily: 'Helvetica',
+    fontSize: 10,
+    color: COLORS.darkGray
+  },
+  
+  // Header styles
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 20,
+    paddingBottom: 15,
+    borderBottomWidth: 3,
+    borderBottomColor: COLORS.eucalyptusGreen
+  },
+  companyName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.rusticRed
+  },
+  invoiceTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.eucalyptusGreen,
+    textAlign: 'right'
+  },
+  invoiceSubtitle: {
+    fontSize: 9,
+    color: COLORS.lightGray,
+    textAlign: 'right',
+    marginTop: 3
+  },
+  
+  // Invoice details box
+  invoiceDetails: {
+    backgroundColor: COLORS.veryLightGray,
+    padding: 12,
+    marginBottom: 20,
+    borderRadius: 3
+  },
+  invoiceNumber: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: COLORS.rusticRed,
+    marginBottom: 6
+  },
+  invoiceDetail: {
+    fontSize: 9,
+    marginBottom: 3
+  },
+  
+  // Info section
+  infoSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20
+  },
+  infoBlock: {
+    width: '48%'
+  },
+  infoTitle: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: COLORS.eucalyptusGreen,
+    marginBottom: 6
+  },
+  infoContent: {
+    fontSize: 9,
+    lineHeight: 1.4
+  },
+  
+  // Table styles
+  table: {
+    marginBottom: 15
+  },
+  tableHeader: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.eucalyptusGreen,
+    padding: 8,
+    color: COLORS.white,
+    fontWeight: 'bold',
+    fontSize: 9
+  },
+  tableRow: {
+    flexDirection: 'row',
+    padding: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eeeeee',
+    minHeight: 25
+  },
+  tableRowEven: {
+    backgroundColor: '#fafafa'
+  },
+  
+  // Table column widths
+  col1: { width: '50%', paddingRight: 5 },
+  col2: { width: '12%', textAlign: 'center' },
+  col3: { width: '19%', textAlign: 'right' },
+  col4: { width: '19%', textAlign: 'right' },
+  
+  itemName: {
+    fontWeight: 'bold',
+    fontSize: 9
+  },
+  itemCustomizations: {
+    fontSize: 8,
+    color: COLORS.lightGray,
+    fontStyle: 'italic',
+    marginTop: 2
+  },
+  
+  // Totals section
+  totalsSection: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: 20
+  },
+  totalsTable: {
+    width: 250,
+    border: 1,
+    borderColor: COLORS.lightGray
+  },
+  totalsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eeeeee',
+    fontSize: 9
+  },
+  totalsRowFinal: {
+    backgroundColor: COLORS.eucalyptusGreen,
+    color: COLORS.white,
+    fontWeight: 'bold',
+    fontSize: 11,
+    borderBottomWidth: 0
+  },
+  
+  // Footer
+  footer: {
+    marginTop: 25,
+    paddingTop: 15,
+    borderTopWidth: 1,
+    borderTopColor: '#eeeeee'
+  },
+  paymentInfo: {
+    fontSize: 10,
+    marginBottom: 8
+  },
+  paymentMethod: {
+    fontWeight: 'bold',
+    color: COLORS.eucalyptusGreen
+  },
+  paidStatus: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: COLORS.rusticRed,
+    marginVertical: 8
+  },
+  footerNote: {
+    fontSize: 8,
+    color: COLORS.lightGray,
+    textAlign: 'center',
+    marginTop: 12
+  }
+});
+
+// React-PDF Document Component
+const InvoiceDocument = ({ invoiceData }) => {
+  const vatBreakdown = calculateVATBreakdown(invoiceData.totalGross);
+  
+  // Payment method translations
+  const paymentMethods = {
+    'CASH': 'Hotovosť',
+    'CARD': 'Karta',
+    'ONLINE': 'Online platba'
+  };
+
+  return (
+    <Document>
+      <Page size="A4" style={styles.page}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.companyName}>{COMPANY_INFO.name}</Text>
+          <View>
+            <Text style={styles.invoiceTitle}>FAKTÚRA</Text>
+            <Text style={styles.invoiceSubtitle}>Daňový doklad</Text>
+          </View>
+        </View>
+
+        {/* Invoice Details */}
+        <View style={styles.invoiceDetails}>
+          <Text style={styles.invoiceNumber}>
+            Číslo faktúry: {invoiceData.invoiceNumber}
+          </Text>
+          <Text style={styles.invoiceDetail}>
+            Dátum vystavenia: {formatDate(invoiceData.createdAt)}
+          </Text>
+          <Text style={styles.invoiceDetail}>
+            Dátum splatnosti: {formatDate(invoiceData.createdAt)}
+          </Text>
+          <Text style={styles.invoiceDetail}>
+            Číslo objednávky: #{invoiceData.order?.orderNumber || 'N/A'}
+          </Text>
+        </View>
+
+        {/* Company and Customer Info */}
+        <View style={styles.infoSection}>
+          <View style={styles.infoBlock}>
+            <Text style={styles.infoTitle}>Dodávateľ</Text>
+            <View style={styles.infoContent}>
+              <Text style={{ fontWeight: 'bold' }}>{COMPANY_INFO.name}</Text>
+              <Text>{COMPANY_INFO.address}</Text>
+              <Text>{COMPANY_INFO.city}</Text>
+              <Text>{'\n'}</Text>
+              <Text>IČO: {COMPANY_INFO.ico}</Text>
+              <Text>DIČ: {COMPANY_INFO.dic}</Text>
+              <Text>IČ DPH: {COMPANY_INFO.vatNumber}</Text>
+            </View>
+          </View>
+          
+          <View style={styles.infoBlock}>
+            <Text style={styles.infoTitle}>Odberateľ</Text>
+            <View style={styles.infoContent}>
+              <Text style={{ fontWeight: 'bold' }}>
+                {invoiceData.customerName || 'Zákazník'}
+              </Text>
+              {invoiceData.customerPhone && (
+                <Text>Tel: {invoiceData.customerPhone}</Text>
+              )}
+              {invoiceData.customerEmail && (
+                <Text>Email: {invoiceData.customerEmail}</Text>
+              )}
+            </View>
+          </View>
+        </View>
+
+        {/* Items Table */}
+        <View style={styles.table}>
+          {/* Table Header */}
+          <View style={styles.tableHeader}>
+            <Text style={styles.col1}>Položka</Text>
+            <Text style={styles.col2}>Mn.</Text>
+            <Text style={styles.col3}>Jedn. cena</Text>
+            <Text style={styles.col4}>Spolu</Text>
+          </View>
+          
+          {/* Table Rows */}
+          {(invoiceData.orderItems || []).map((item, index) => (
+            <View 
+              key={index} 
+              style={[
+                styles.tableRow, 
+                index % 2 === 0 ? styles.tableRowEven : {}
+              ]}
+            >
+              <View style={styles.col1}>
+                <Text style={styles.itemName}>
+                  {item.name || 'Unknown Item'}
+                </Text>
+                {item.customizations && (
+                  <Text style={styles.itemCustomizations}>
+                    • {item.customizations}
+                  </Text>
+                )}
+              </View>
+              <Text style={styles.col2}>{item.quantity || 1}</Text>
+              <Text style={styles.col3}>
+                {formatCurrency(item.unitPrice || item.price || 0)}
+              </Text>
+              <Text style={styles.col4}>
+                {formatCurrency(item.totalPrice || 0)}
+              </Text>
+            </View>
+          ))}
+        </View>
+
+        {/* Totals */}
+        <View style={styles.totalsSection}>
+          <View style={styles.totalsTable}>
+            <View style={styles.totalsRow}>
+              <Text>Medzisúčet:</Text>
+              <Text>{formatCurrency(invoiceData.subtotal || vatBreakdown.netAmount)}</Text>
+            </View>
+            
+            {invoiceData.deliveryFee && invoiceData.deliveryFee > 0 && (
+              <View style={styles.totalsRow}>
+                <Text>Poplatok za doručenie:</Text>
+                <Text>{formatCurrency(invoiceData.deliveryFee)}</Text>
+              </View>
+            )}
+            
+            <View style={styles.totalsRow}>
+              <Text>Základ DPH 19%:</Text>
+              <Text>{formatCurrency(vatBreakdown.netAmount)}</Text>
+            </View>
+            
+            <View style={styles.totalsRow}>
+              <Text>DPH 19%:</Text>
+              <Text>{formatCurrency(vatBreakdown.vatAmount)}</Text>
+            </View>
+            
+            <View style={[styles.totalsRow, styles.totalsRowFinal]}>
+              <Text>CELKOM:</Text>
+              <Text>{formatCurrency(invoiceData.totalGross)}</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Footer */}
+        <View style={styles.footer}>
+          <Text style={styles.paymentInfo}>
+            Spôsob platby: {' '}
+            <Text style={styles.paymentMethod}>
+              {paymentMethods[invoiceData.paymentMethod] || invoiceData.paymentMethod}
+            </Text>
+          </Text>
+          
+          <Text style={styles.paidStatus}>UHRADENÉ</Text>
+          
+          <Text style={styles.footerNote}>
+            Ďakujeme za vašu návštevu!{'\n'}
+            Palace Cafe & Street Food - Autentické chute od 2016
+          </Text>
+        </View>
+      </Page>
+    </Document>
+  );
+};
+
 /**
- * Generate invoice PDF using PDFmake
+ * Generate invoice PDF using React-PDF
  */
-function generateInvoicePDF(invoiceData) {
-  return new Promise((resolve, reject) => {
-    try {
-      console.log('🚀 Starting PDFmake invoice generation...');
-      
-      const vatBreakdown = calculateVATBreakdown(invoiceData.totalGross);
-      
-      // Payment method translations
-      const paymentMethods = {
-        'CASH': 'Hotovosť',
-        'CARD': 'Karta',
-        'ONLINE': 'Online platba'
-      };
-
-      // Create items table data
-      const itemsTableBody = [
-        // Header row
-        [
-          { text: 'Položka', style: 'tableHeader' },
-          { text: 'Mn.', style: 'tableHeader', alignment: 'center' },
-          { text: 'Jedn. cena', style: 'tableHeader', alignment: 'right' },
-          { text: 'Spolu', style: 'tableHeader', alignment: 'right' }
-        ]
-      ];
-
-      // Add items
-      (invoiceData.orderItems || []).forEach(item => {
-        const itemRow = [
-          {
-            text: [
-              { text: item.name || 'Unknown Item', style: 'itemName' },
-              item.customizations ? 
-                { text: `\n• ${item.customizations}`, style: 'itemCustomizations' } : 
-                ''
-            ]
-          },
-          { text: (item.quantity || 1).toString(), alignment: 'center' },
-          { text: formatCurrency(item.unitPrice || item.price || 0), alignment: 'right' },
-          { text: formatCurrency(item.totalPrice || 0), alignment: 'right' }
-        ];
-        itemsTableBody.push(itemRow);
-      });
-
-      // PDF document definition
-      const docDefinition = {
-        pageSize: 'A4',
-        pageMargins: [40, 40, 40, 40],
-        
-        content: [
-          // Header
-          {
-            columns: [
-              {
-                width: '60%',
-                text: COMPANY_INFO.name,
-                style: 'companyName'
-              },
-              {
-                width: '40%',
-                alignment: 'right',
-                stack: [
-                  { text: 'FAKTÚRA', style: 'invoiceTitle' },
-                  { text: 'Daňový doklad', style: 'invoiceSubtitle' }
-                ]
-              }
-            ],
-            margin: [0, 0, 0, 20]
-          },
-          
-          // Horizontal line
-          {
-            canvas: [
-              {
-                type: 'line',
-                x1: 0, y1: 0,
-                x2: 515, y2: 0,
-                lineWidth: 2,
-                lineColor: COLORS.eucalyptusGreen
-              }
-            ],
-            margin: [0, 0, 0, 20]
-          },
-          
-          // Invoice details box
-          {
-            table: {
-              widths: ['*'],
-              body: [
-                [{
-                  stack: [
-                    { text: `Číslo faktúry: ${invoiceData.invoiceNumber}`, style: 'invoiceNumber' },
-                    { text: `Dátum vystavenia: ${formatDate(invoiceData.createdAt)}`, style: 'invoiceDetail' },
-                    { text: `Dátum splatnosti: ${formatDate(invoiceData.createdAt)}`, style: 'invoiceDetail' },
-                    { text: `Číslo objednávky: #${invoiceData.order?.orderNumber || 'N/A'}`, style: 'invoiceDetail' }
-                  ],
-                  fillColor: COLORS.veryLightGray,
-                  margin: [10, 10, 10, 10]
-                }]
-              ]
-            },
-            layout: 'noBorders',
-            margin: [0, 0, 0, 20]
-          },
-          
-          // Company and customer info
-          {
-            columns: [
-              {
-                width: '48%',
-                stack: [
-                  { text: 'Dodávateľ', style: 'sectionTitle' },
-                  { text: COMPANY_INFO.name, style: 'companyDetail', bold: true },
-                  { text: COMPANY_INFO.address, style: 'companyDetail' },
-                  { text: COMPANY_INFO.city, style: 'companyDetail' },
-                  { text: '', margin: [0, 5] }, // Spacer
-                  { text: `IČO: ${COMPANY_INFO.ico}`, style: 'companyDetail' },
-                  { text: `DIČ: ${COMPANY_INFO.dic}`, style: 'companyDetail' },
-                  { text: `IČ DPH: ${COMPANY_INFO.vatNumber}`, style: 'companyDetail' }
-                ]
-              },
-              {
-                width: '4%',
-                text: '' // Spacer column
-              },
-              {
-                width: '48%',
-                stack: [
-                  { text: 'Odberateľ', style: 'sectionTitle' },
-                  { text: invoiceData.customerName || 'Zákazník', style: 'customerDetail', bold: true },
-                  invoiceData.customerPhone ? 
-                    { text: `Tel: ${invoiceData.customerPhone}`, style: 'customerDetail' } : {},
-                  invoiceData.customerEmail ? 
-                    { text: `Email: ${invoiceData.customerEmail}`, style: 'customerDetail' } : {}
-                ]
-              }
-            ],
-            margin: [0, 0, 0, 30]
-          },
-          
-          // Items table
-          {
-            table: {
-              headerRows: 1,
-              widths: ['50%', '10%', '20%', '20%'],
-              body: itemsTableBody
-            },
-            layout: {
-              fillColor: function (rowIndex) {
-                return (rowIndex === 0) ? COLORS.eucalyptusGreen : 
-                       (rowIndex % 2 === 0) ? '#fafafa' : null;
-              },
-              hLineWidth: function (i, node) {
-                return (i === 0 || i === 1 || i === node.table.body.length) ? 2 : 1;
-              },
-              vLineWidth: function () { return 1; },
-              hLineColor: function (i, node) {
-                return (i === 0 || i === 1 || i === node.table.body.length) ? 
-                  COLORS.eucalyptusGreen : '#eeeeee';
-              },
-              vLineColor: function () { return '#eeeeee'; }
-            },
-            margin: [0, 0, 0, 20]
-          },
-          
-          // Totals section
-          {
-            columns: [
-              { width: '60%', text: '' }, // Spacer
-              {
-                width: '40%',
-                table: {
-                  widths: ['60%', '40%'],
-                  body: [
-                    ['Medzisúčet:', { text: formatCurrency(invoiceData.subtotal || vatBreakdown.netAmount), alignment: 'right' }],
-                    ...(invoiceData.deliveryFee && invoiceData.deliveryFee > 0 ? 
-                      [['Poplatok za doručenie:', { text: formatCurrency(invoiceData.deliveryFee), alignment: 'right' }]] : 
-                      []
-                    ),
-                    ['Základ DPH 19%:', { text: formatCurrency(vatBreakdown.netAmount), alignment: 'right' }],
-                    ['DPH 19%:', { text: formatCurrency(vatBreakdown.vatAmount), alignment: 'right' }],
-                    [
-                      { text: 'CELKOM:', style: 'totalLabel' },
-                      { text: formatCurrency(invoiceData.totalGross), style: 'totalAmount', alignment: 'right' }
-                    ]
-                  ]
-                },
-                layout: {
-                  fillColor: function (rowIndex, node) {
-                    return (rowIndex === node.table.body.length - 1) ? COLORS.eucalyptusGreen : null;
-                  },
-                  hLineWidth: function (i, node) {
-                    return (i === node.table.body.length - 1) ? 2 : 1;
-                  },
-                  hLineColor: function (i, node) {
-                    return (i === node.table.body.length - 1) ? COLORS.eucalyptusGreen : COLORS.lightGray;
-                  }
-                }
-              }
-            ],
-            margin: [0, 0, 0, 30]
-          },
-          
-          // Footer
-          {
-            stack: [
-              {
-                text: [
-                  { text: 'Spôsob platby: ', style: 'footerLabel' },
-                  { text: paymentMethods[invoiceData.paymentMethod] || invoiceData.paymentMethod, style: 'footerValue' }
-                ],
-                margin: [0, 0, 0, 10]
-              },
-              { text: 'UHRADENÉ', style: 'paidStatus', margin: [0, 0, 0, 20] },
-              {
-                text: 'Ďakujeme za vašu návštevu!\nPalace Cafe & Street Food - Autentické chute od 2016',
-                style: 'footerNote',
-                alignment: 'center'
-              }
-            ]
-          }
-        ],
-        
-        // Styles definition
-        styles: {
-          companyName: {
-            fontSize: 18,
-            bold: true,
-            color: COLORS.rusticRed
-          },
-          invoiceTitle: {
-            fontSize: 16,
-            bold: true,
-            color: COLORS.eucalyptusGreen
-          },
-          invoiceSubtitle: {
-            fontSize: 9,
-            color: COLORS.lightGray,
-            margin: [0, 2, 0, 0]
-          },
-          invoiceNumber: {
-            fontSize: 14,
-            bold: true,
-            color: COLORS.rusticRed,
-            margin: [0, 0, 0, 5]
-          },
-          invoiceDetail: {
-            fontSize: 10,
-            margin: [0, 2, 0, 0]
-          },
-          sectionTitle: {
-            fontSize: 12,
-            bold: true,
-            color: COLORS.eucalyptusGreen,
-            margin: [0, 0, 0, 8]
-          },
-          companyDetail: {
-            fontSize: 9,
-            margin: [0, 1, 0, 0]
-          },
-          customerDetail: {
-            fontSize: 9,
-            margin: [0, 1, 0, 0]
-          },
-          tableHeader: {
-            fontSize: 10,
-            bold: true,
-            color: 'white',
-            margin: [5, 5, 5, 5]
-          },
-          itemName: {
-            fontSize: 10,
-            bold: true
-          },
-          itemCustomizations: {
-            fontSize: 8,
-            color: COLORS.lightGray,
-            italics: true
-          },
-          totalLabel: {
-            fontSize: 12,
-            bold: true,
-            color: 'white'
-          },
-          totalAmount: {
-            fontSize: 12,
-            bold: true,
-            color: 'white'
-          },
-          footerLabel: {
-            fontSize: 10,
-            bold: true
-          },
-          footerValue: {
-            fontSize: 10,
-            color: COLORS.eucalyptusGreen
-          },
-          paidStatus: {
-            fontSize: 12,
-            bold: true,
-            color: COLORS.rusticRed
-          },
-          footerNote: {
-            fontSize: 8,
-            color: COLORS.lightGray
-          }
-        },
-        
-        defaultStyle: {
-          font: 'Helvetica',
-          fontSize: 10,
-          color: COLORS.darkGray
-        }
-      };
-
-      // Generate PDF
-      const pdfDoc = pdfMake.createPdf(docDefinition);
-      
-      pdfDoc.getBuffer((buffer) => {
-        console.log('✅ PDFmake invoice generated successfully');
-        resolve(buffer);
-      });
-
-    } catch (error) {
-      console.error('❌ PDFmake invoice generation failed:', error);
-      reject(error);
-    }
-  });
+async function generateInvoicePDF(invoiceData) {
+  try {
+    console.log('🚀 Starting React-PDF invoice generation...');
+    
+    // Create PDF document
+    const doc = <InvoiceDocument invoiceData={invoiceData} />;
+    
+    // Generate PDF buffer
+    const pdfBuffer = await pdf(doc).toBuffer();
+    
+    console.log('✅ React-PDF invoice generated successfully');
+    return pdfBuffer;
+    
+  } catch (error) {
+    console.error('❌ React-PDF invoice generation failed:', error);
+    throw error;
+  }
 }
 
 module.exports = {
