@@ -878,33 +878,40 @@ app.post('/api/stripe/create-payment-intent', orderLimiter, asyncHandler(async (
       console.log('✅ Created new Stripe customer:', customer.id);
     }
 
+    // Prepare payment intent parameters
+    const paymentIntentParams = {
+        amount: Math.round(amount * 100), // Convert euros to cents
+        currency: currency.toLowerCase(),
+        customer: customer.id,
+        payment_method_types: ['card'],
+        capture_method: 'automatic', // Charge immediately on confirmation
+        description: `Palace Cafe Order - ${orderData.customerName}`,
+        metadata: {
+            customer_name: orderData.customerName,
+            customer_email: orderData.customerEmail,
+            customer_phone: orderData.customerPhone || '',
+            order_type: orderData.orderType || 'PICKUP',
+            restaurant: 'Palace Cafe & Street Food',
+            ...metadata
+        },
+        receipt_email: orderData.customerEmail
+    };
+    
+    // Only add shipping for delivery orders
+    if (orderData.orderType === 'DELIVERY' && orderData.deliveryAddress) {
+        paymentIntentParams.shipping = {
+            name: orderData.customerName,
+            phone: orderData.customerPhone,
+            address: {
+                line1: orderData.deliveryAddress,
+                city: 'Komárno',
+                country: 'SK'
+            }
+        };
+    }
+    
     // Create payment intent
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(amount * 100), // Convert euros to cents
-      currency: currency.toLowerCase(),
-      customer: customer.id,
-      payment_method_types: ['card'],
-      capture_method: 'automatic', // Charge immediately on confirmation
-      description: `Palace Cafe Order - ${orderData.customerName}`,
-      metadata: {
-        customer_name: orderData.customerName,
-        customer_email: orderData.customerEmail,
-        customer_phone: orderData.customerPhone || '',
-        order_type: orderData.orderType || 'PICKUP',
-        restaurant: 'Palace Cafe & Street Food',
-        ...metadata
-      },
-      receipt_email: orderData.customerEmail,
-      shipping: orderData.orderType === 'DELIVERY' ? {
-        name: orderData.customerName,
-        phone: orderData.customerPhone,
-        address: {
-          line1: orderData.deliveryAddress || '',
-          city: 'Komárno',
-          country: 'SK'
-        }
-      } : null
-    });
+    const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams);
 
     console.log('✅ Payment intent created:', paymentIntent.id);
 
