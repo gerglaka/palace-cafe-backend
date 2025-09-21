@@ -1260,7 +1260,7 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyn
           const updatedOrder = await prisma.order.update({
             where: { id: payment.orderId },
             data: { 
-              status: 'CONFIRMED',
+              status: 'PENDING',
               confirmedAt: new Date()
             }
           });
