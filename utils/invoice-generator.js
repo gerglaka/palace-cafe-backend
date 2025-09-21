@@ -185,14 +185,16 @@ function generateInvoicePDF(invoiceData) {
         }
       });
       
-      // Register font for Unicode support (fallback to built-in if not available)
-      try {
-        // You can add custom fonts here if needed
-        // doc.registerFont('CustomFont', 'path/to/unicode-font.ttf');
-        // doc.font('CustomFont');
-      } catch (fontError) {
-        console.log('Using default font for Unicode support');
-      }
+      //// Register font for Unicode support (fallback to built-in if not available)
+      //try {
+      //  // You can add custom fonts here if needed
+      //  // doc.registerFont('CustomFont', 'path/to/unicode-font.ttf');
+      //  // doc.font('CustomFont');
+      //} catch (fontError) {
+      //  console.log('Using default font for Unicode support');
+      //}
+
+      doc.font('Times-Roman');
       
       const buffers = [];
       doc.on('data', buffers.push.bind(buffers));
