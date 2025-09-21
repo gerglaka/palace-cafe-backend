@@ -1,14 +1,15 @@
 /**
- * Palace Cafe & Street Food - React-PDF Invoice Generator (No JSX)
- * Pure JavaScript React elements, no transpilation needed
- * Uses your exact VAT calculation: VAT = GROSS * 0.19, NET = GROSS - VAT
- * Slovak language only
+ * Palace Cafe & Street Food - Invoice Generator (FIXED VERSION)
+ * Professional invoice generation with Slovak legal compliance
+ * Fixed UTF-8 encoding and your exact VAT calculation method
+ * VAT = GROSS * 0.19, NET = GROSS - VAT
  */
 
-const React = require('react');
-const { Document, Page, Text, View, StyleSheet, pdf } = require('@react-pdf/renderer');
+const PDFDocument = require('pdfkit');
+const fs = require('fs');
+const path = require('path');
 
-// Company details
+// Company details - FIXED ENCODING
 const COMPANY_INFO = {
   name: 'Palace Cafe & Street Food s.r.o.',
   address: 'Hradná 168/2',
@@ -24,25 +25,63 @@ const COLORS = {
   eucalyptusGreen: '#1D665D',
   darkGray: '#333333',
   lightGray: '#666666',
-  veryLightGray: '#f5f5f5',
-  white: '#ffffff'
+  veryLightGray: '#f5f5f5'
 };
 
-/**
- * Calculate VAT breakdown using YOUR METHOD
- * GROSS = x, VAT = x * 0.19, NET = GROSS - VAT
- */
-function calculateVATBreakdown(grossAmount) {
-  const vatRate = 0.19; // 19%
-  const vatAmount = Math.round(grossAmount * vatRate * 100) / 100;
-  const netAmount = Math.round((grossAmount - vatAmount) * 100) / 100;
+// Slovak/Hungarian translations - FIXED ENCODING
+const TRANSLATIONS = {
+  // Invoice header
+  invoice: { sk: 'FAKTÚRA', hu: 'SZÁMLA' },
+  taxInvoice: { sk: 'Daňový doklad', hu: 'Adóbizonylat' },
   
-  return {
-    netAmount,
-    vatAmount,
-    grossAmount: Math.round(grossAmount * 100) / 100
-  };
-}
+  // Company info
+  supplier: { sk: 'Dodávateľ', hu: 'Szállító' },
+  customer: { sk: 'Odberateľ', hu: 'Vevő' },
+  
+  // Order details
+  orderNumber: { sk: 'Číslo objednávky', hu: 'Rendelés száma' },
+  orderType: { sk: 'Typ objednávky', hu: 'Rendelés típusa' },
+  delivery: { sk: 'Doručenie', hu: 'Szállítás' },
+  pickup: { sk: 'Vyzdvihnutie', hu: 'Átvétel' },
+  
+  // Dates
+  issueDate: { sk: 'Dátum vystavenia', hu: 'Kiállítás dátuma' },
+  dueDate: { sk: 'Dátum splatnosti', hu: 'Esedékesség dátuma' },
+  
+  // Table headers
+  item: { sk: 'Položka', hu: 'Tétel' },
+  quantity: { sk: 'Množstvo', hu: 'Mennyiség' },
+  unitPrice: { sk: 'Jednotková cena', hu: 'Egységár' },
+  total: { sk: 'Celkom', hu: 'Összesen' },
+  
+  // Totals
+  subtotal: { sk: 'Medzisúčet', hu: 'Részösszeg' },
+  deliveryFee: { sk: 'Poplatok za doručenie', hu: 'Szállítási díj' },
+  vatBase: { sk: 'Základ DPH 19%', hu: 'ÁFA alap 19%' },
+  vatAmount: { sk: 'DPH 19%', hu: 'ÁFA 19%' },
+  totalAmount: { sk: 'Celková suma', hu: 'Végösszeg' },
+  
+  // Payment
+  paymentMethod: { sk: 'Spôsob platby', hu: 'Fizetési mód' },
+  cash: { sk: 'Hotovosť', hu: 'Készpénz' },
+  card: { sk: 'Karta', hu: 'Kártya' },
+  online: { sk: 'Online platba', hu: 'Online fizetés' },
+  paid: { sk: 'Uhradené', hu: 'Kifizetve' },
+  
+  // Menu items (add more as needed)
+  menuItems: {
+    'palace-burger': { sk: 'Palace Burger', hu: 'Palace Burger' },
+    'cheeseburger': { sk: 'Cheeseburger', hu: 'Sajtos Burger' },
+    'chicken-burger': { sk: 'Kuracie burger', hu: 'Csirke Burger' },
+    'fanta': { sk: 'Fanta', hu: 'Fanta' },
+    'coca-cola': { sk: 'Coca-Cola', hu: 'Coca-Cola' },
+    'sprite': { sk: 'Sprite', hu: 'Sprite' },
+    'beer': { sk: 'Pivo', hu: 'Sör' },
+    'fries': { sk: 'Hranolky', hu: 'Sült krumpli' },
+    'extra-cheese': { sk: 'Extra syr', hu: 'Extra sajt' },
+    'bacon': { sk: 'Slanina', hu: 'Szalonna' }
+  }
+};
 
 /**
  * Generate invoice number based on payment method and year
@@ -84,6 +123,22 @@ async function getNextInvoiceCounter(paymentMethod, year, prisma) {
 }
 
 /**
+ * Calculate VAT breakdown using YOUR EXACT METHOD
+ * GROSS = x, VAT = x * 0.19, NET = GROSS - VAT
+ */
+function calculateVATBreakdown(grossAmount) {
+  const vatRate = 0.19; // 19%
+  const vatAmount = Math.round(grossAmount * vatRate * 100) / 100;
+  const netAmount = Math.round((grossAmount - vatAmount) * 100) / 100;
+  
+  return {
+    netAmount,
+    vatAmount,
+    grossAmount: Math.round(grossAmount * 100) / 100
+  };
+}
+
+/**
  * Format currency for display
  */
 function formatCurrency(amount) {
@@ -101,355 +156,350 @@ function formatDate(date) {
   return new Date(date).toLocaleDateString('sk-SK');
 }
 
-// Define styles for React-PDF
-const styles = StyleSheet.create({
-  page: {
-    backgroundColor: COLORS.white,
-    padding: 30,
-    fontFamily: 'Helvetica',
-    fontSize: 10,
-    color: COLORS.darkGray
-  },
-  
-  // Header styles
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 20,
-    paddingBottom: 15,
-    borderBottomWidth: 3,
-    borderBottomColor: COLORS.eucalyptusGreen
-  },
-  companyName: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: COLORS.rusticRed
-  },
-  invoiceTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: COLORS.eucalyptusGreen,
-    textAlign: 'right'
-  },
-  invoiceSubtitle: {
-    fontSize: 9,
-    color: COLORS.lightGray,
-    textAlign: 'right',
-    marginTop: 3
-  },
-  
-  // Invoice details box
-  invoiceDetails: {
-    backgroundColor: COLORS.veryLightGray,
-    padding: 12,
-    marginBottom: 20,
-    borderRadius: 3
-  },
-  invoiceNumber: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: COLORS.rusticRed,
-    marginBottom: 6
-  },
-  invoiceDetail: {
-    fontSize: 9,
-    marginBottom: 3
-  },
-  
-  // Info section
-  infoSection: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 20
-  },
-  infoBlock: {
-    width: '48%'
-  },
-  infoTitle: {
-    fontSize: 11,
-    fontWeight: 'bold',
-    color: COLORS.eucalyptusGreen,
-    marginBottom: 6
-  },
-  infoContent: {
-    fontSize: 9,
-    lineHeight: 1.4
-  },
-  
-  // Table styles
-  table: {
-    marginBottom: 15
-  },
-  tableHeader: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.eucalyptusGreen,
-    padding: 8,
-    color: COLORS.white,
-    fontWeight: 'bold',
-    fontSize: 9
-  },
-  tableRow: {
-    flexDirection: 'row',
-    padding: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eeeeee',
-    minHeight: 25
-  },
-  tableRowEven: {
-    backgroundColor: '#fafafa'
-  },
-  
-  // Table column widths
-  col1: { width: '50%', paddingRight: 5 },
-  col2: { width: '12%', textAlign: 'center' },
-  col3: { width: '19%', textAlign: 'right' },
-  col4: { width: '19%', textAlign: 'right' },
-  
-  itemName: {
-    fontWeight: 'bold',
-    fontSize: 9
-  },
-  itemCustomizations: {
-    fontSize: 8,
-    color: COLORS.lightGray,
-    fontStyle: 'italic',
-    marginTop: 2
-  },
-  
-  // Totals section
-  totalsSection: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    marginBottom: 20
-  },
-  totalsTable: {
-    width: 250,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: COLORS.lightGray
-  },
-  totalsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eeeeee',
-    fontSize: 9
-  },
-  totalsRowFinal: {
-    backgroundColor: COLORS.eucalyptusGreen,
-    color: COLORS.white,
-    fontWeight: 'bold',
-    fontSize: 11,
-    borderBottomWidth: 0
-  },
-  
-  // Footer
-  footer: {
-    marginTop: 25,
-    paddingTop: 15,
-    borderTopWidth: 1,
-    borderTopColor: '#eeeeee'
-  },
-  paymentInfo: {
-    fontSize: 10,
-    marginBottom: 8
-  },
-  paymentMethod: {
-    fontWeight: 'bold',
-    color: COLORS.eucalyptusGreen
-  },
-  paidStatus: {
-    fontSize: 11,
-    fontWeight: 'bold',
-    color: COLORS.rusticRed,
-    marginVertical: 8
-  },
-  footerNote: {
-    fontSize: 8,
-    color: COLORS.lightGray,
-    textAlign: 'center',
-    marginTop: 12
-  }
-});
-
 /**
- * Create React-PDF Document using React.createElement (no JSX)
+ * Translate menu item name
  */
-function createInvoiceDocument(invoiceData) {
-  const vatBreakdown = calculateVATBreakdown(invoiceData.totalGross);
-  
-  // Payment method translations
-  const paymentMethods = {
-    'CASH': 'Hotovosť',
-    'CARD': 'Karta',
-    'ONLINE': 'Online platba'
-  };
-
-  return React.createElement(Document, null,
-    React.createElement(Page, { size: "A4", style: styles.page },
-      
-      // Header
-      React.createElement(View, { style: styles.header },
-        React.createElement(Text, { style: styles.companyName }, COMPANY_INFO.name),
-        React.createElement(View, null,
-          React.createElement(Text, { style: styles.invoiceTitle }, "FAKTÚRA"),
-          React.createElement(Text, { style: styles.invoiceSubtitle }, "Daňový doklad")
-        )
-      ),
-
-      // Invoice Details
-      React.createElement(View, { style: styles.invoiceDetails },
-        React.createElement(Text, { style: styles.invoiceNumber }, 
-          `Číslo faktúry: ${invoiceData.invoiceNumber}`
-        ),
-        React.createElement(Text, { style: styles.invoiceDetail }, 
-          `Dátum vystavenia: ${formatDate(invoiceData.createdAt)}`
-        ),
-        React.createElement(Text, { style: styles.invoiceDetail }, 
-          `Dátum splatnosti: ${formatDate(invoiceData.createdAt)}`
-        ),
-        React.createElement(Text, { style: styles.invoiceDetail }, 
-          `Číslo objednávky: #${invoiceData.order?.orderNumber || 'N/A'}`
-        )
-      ),
-
-      // Company and Customer Info
-      React.createElement(View, { style: styles.infoSection },
-        React.createElement(View, { style: styles.infoBlock },
-          React.createElement(Text, { style: styles.infoTitle }, "Dodávateľ"),
-          React.createElement(View, { style: styles.infoContent },
-            React.createElement(Text, { style: { fontWeight: 'bold' } }, COMPANY_INFO.name),
-            React.createElement(Text, null, COMPANY_INFO.address),
-            React.createElement(Text, null, COMPANY_INFO.city),
-            React.createElement(Text, null, "\n"),
-            React.createElement(Text, null, `IČO: ${COMPANY_INFO.ico}`),
-            React.createElement(Text, null, `DIČ: ${COMPANY_INFO.dic}`),
-            React.createElement(Text, null, `IČ DPH: ${COMPANY_INFO.vatNumber}`)
-          )
-        ),
-        
-        React.createElement(View, { style: styles.infoBlock },
-          React.createElement(Text, { style: styles.infoTitle }, "Odberateľ"),
-          React.createElement(View, { style: styles.infoContent },
-            React.createElement(Text, { style: { fontWeight: 'bold' } }, 
-              invoiceData.customerName || 'Zákazník'
-            ),
-            invoiceData.customerPhone ? 
-              React.createElement(Text, null, `Tel: ${invoiceData.customerPhone}`) : null,
-            invoiceData.customerEmail ? 
-              React.createElement(Text, null, `Email: ${invoiceData.customerEmail}`) : null
-          )
-        )
-      ),
-
-      // Items Table
-      React.createElement(View, { style: styles.table },
-        // Table Header
-        React.createElement(View, { style: styles.tableHeader },
-          React.createElement(Text, { style: styles.col1 }, "Položka"),
-          React.createElement(Text, { style: styles.col2 }, "Mn."),
-          React.createElement(Text, { style: styles.col3 }, "Jedn. cena"),
-          React.createElement(Text, { style: styles.col4 }, "Spolu")
-        ),
-        
-        // Table Rows
-        ...(invoiceData.orderItems || []).map((item, index) =>
-          React.createElement(View, { 
-            key: index, 
-            style: [styles.tableRow, index % 2 === 0 ? styles.tableRowEven : {}]
-          },
-            React.createElement(View, { style: styles.col1 },
-              React.createElement(Text, { style: styles.itemName }, 
-                item.name || 'Unknown Item'
-              ),
-              item.customizations && 
-                React.createElement(Text, { style: styles.itemCustomizations }, 
-                  `• ${item.customizations}`
-                )
-            ),
-            React.createElement(Text, { style: styles.col2 }, (item.quantity || 1).toString()),
-            React.createElement(Text, { style: styles.col3 }, 
-              formatCurrency(item.unitPrice || item.price || 0)
-            ),
-            React.createElement(Text, { style: styles.col4 }, 
-              formatCurrency(item.totalPrice || 0)
-            )
-          )
-        )
-      ),
-
-      // Totals
-      React.createElement(View, { style: styles.totalsSection },
-        React.createElement(View, { style: styles.totalsTable },
-          React.createElement(View, { style: styles.totalsRow },
-            React.createElement(Text, null, "Medzisúčet:"),
-            React.createElement(Text, null, formatCurrency(invoiceData.subtotal || vatBreakdown.netAmount))
-          ),
-          
-          invoiceData.deliveryFee && invoiceData.deliveryFee > 0 ?
-            React.createElement(View, { style: styles.totalsRow },
-              React.createElement(Text, null, "Poplatok za doručenie:"),
-              React.createElement(Text, null, formatCurrency(invoiceData.deliveryFee))
-            ) : null,
-          
-          React.createElement(View, { style: styles.totalsRow },
-            React.createElement(Text, null, "Základ DPH 19%:"),
-            React.createElement(Text, null, formatCurrency(vatBreakdown.netAmount))
-          ),
-          
-          React.createElement(View, { style: styles.totalsRow },
-            React.createElement(Text, null, "DPH 19%:"),
-            React.createElement(Text, null, formatCurrency(vatBreakdown.vatAmount))
-          ),
-          
-          React.createElement(View, { style: [styles.totalsRow, styles.totalsRowFinal] },
-            React.createElement(Text, null, "CELKOM:"),
-            React.createElement(Text, null, formatCurrency(invoiceData.totalGross))
-          )
-        )
-      ),
-
-      // Footer
-      React.createElement(View, { style: styles.footer },
-        React.createElement(Text, { style: styles.paymentInfo },
-          "Spôsob platby: ",
-          React.createElement(Text, { style: styles.paymentMethod },
-            paymentMethods[invoiceData.paymentMethod] || invoiceData.paymentMethod
-          )
-        ),
-        
-        React.createElement(Text, { style: styles.paidStatus }, "UHRADENÉ"),
-        
-        React.createElement(Text, { style: styles.footerNote },
-          "Ďakujeme za vašu návštevu!\nPalace Cafe & Street Food - Autentické chute od 2016"
-        )
-      )
-    )
-  );
+function translateMenuItem(slug, language = 'sk') {
+  if (TRANSLATIONS.menuItems[slug]) {
+    return TRANSLATIONS.menuItems[slug][language];
+  }
+  // Fallback to original name if no translation found
+  return slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 }
 
 /**
- * Generate invoice PDF using React-PDF
+ * Generate invoice PDF with proper UTF-8 encoding
  */
-async function generateInvoicePDF(invoiceData) {
-  try {
-    console.log('🚀 Starting React-PDF invoice generation...');
-    
-    // Create PDF document using React.createElement (no JSX)
-    const doc = createInvoiceDocument(invoiceData);
-    
-    // Generate PDF buffer
-    const pdfBuffer = await pdf(doc).toBuffer();
-    
-    console.log('✅ React-PDF invoice generated successfully');
-    return pdfBuffer;
-    
-  } catch (error) {
-    console.error('❌ React-PDF invoice generation failed:', error);
-    throw error;
+function generateInvoicePDF(invoiceData) {
+  return new Promise((resolve, reject) => {
+    try {
+      // Create PDF with proper settings for UTF-8
+      const doc = new PDFDocument({ 
+        size: 'A4', 
+        margin: 50,
+        bufferPages: true,
+        compress: false,
+        info: {
+          Title: `Faktúra ${invoiceData.invoiceNumber}`,
+          Subject: 'Palace Cafe & Street Food - Faktúra',
+          Author: COMPANY_INFO.name
+        }
+      });
+      
+      // Use Helvetica font for better Unicode support
+      doc.font('Helvetica');
+      
+      const buffers = [];
+      doc.on('data', buffers.push.bind(buffers));
+      doc.on('end', () => {
+        const pdfData = Buffer.concat(buffers);
+        resolve(pdfData);
+      });
+      
+      // Header
+      drawHeader(doc);
+      
+      // Invoice info
+      drawInvoiceInfo(doc, invoiceData);
+      
+      // Company and customer info
+      drawCompanyInfo(doc);
+      drawCustomerInfo(doc, invoiceData);
+      
+      // Items table
+      const tableEndY = drawItemsTable(doc, invoiceData);
+      
+      // Totals
+      drawTotals(doc, invoiceData, tableEndY);
+      
+      // Footer
+      drawFooter(doc, invoiceData);
+      
+      doc.end();
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+/**
+ * Draw PDF header
+ */
+function drawHeader(doc) {
+  // Company name in brand color
+  doc.fontSize(24)
+     .fillColor(COLORS.rusticRed)
+     .text(COMPANY_INFO.name, 50, 50);
+  
+  // Invoice title
+  doc.fontSize(20)
+     .fillColor(COLORS.eucalyptusGreen)
+     .text('FAKTÚRA / SZÁMLA', 350, 50, { align: 'right' });
+  
+  // Tax invoice subtitle
+  doc.fontSize(10)
+     .fillColor(COLORS.lightGray)
+     .text('Daňový doklad / Adóbizonylat', 350, 75, { align: 'right' });
+  
+  // Line separator
+  doc.strokeColor(COLORS.eucalyptusGreen)
+     .lineWidth(2)
+     .moveTo(50, 100)
+     .lineTo(545, 100)
+     .stroke();
+}
+
+/**
+ * Draw invoice information
+ */
+function drawInvoiceInfo(doc, invoiceData) {
+  let y = 120;
+  
+  // Invoice number
+  doc.fontSize(12)
+     .fillColor(COLORS.darkGray)
+     .text('Číslo faktúry / Számla száma:', 350, y)
+     .font('Helvetica-Bold')
+     .fillColor(COLORS.rusticRed)
+     .text(invoiceData.invoiceNumber, 350, y + 15);
+  
+  // Dates
+  y += 40;
+  doc.font('Helvetica')
+     .fillColor(COLORS.darkGray)
+     .fontSize(10)
+     .text('Dátum vystavenia / Kiállítás dátuma:', 350, y)
+     .text(formatDate(invoiceData.createdAt), 350, y + 12)
+     .text('Dátum splatnosti / Esedékesség:', 350, y + 30)
+     .text(formatDate(invoiceData.createdAt), 350, y + 42);
+  
+  // Order info
+  y += 70;
+  doc.text('Číslo objednávky / Rendelés száma:', 350, y)
+     .font('Helvetica-Bold')
+     .text(`#${invoiceData.order?.orderNumber || 'N/A'}`, 350, y + 12);
+}
+
+/**
+ * Draw company information
+ */
+function drawCompanyInfo(doc) {
+  let y = 120;
+  
+  doc.fontSize(12)
+     .font('Helvetica-Bold')
+     .fillColor(COLORS.eucalyptusGreen)
+     .text('Dodávateľ / Szállító', 50, y);
+  
+  y += 20;
+  doc.font('Helvetica')
+     .fillColor(COLORS.darkGray)
+     .fontSize(10)
+     .text(COMPANY_INFO.name, 50, y)
+     .text(COMPANY_INFO.address, 50, y + 12)
+     .text(COMPANY_INFO.city, 50, y + 24)
+     .text(`IČO: ${COMPANY_INFO.ico}`, 50, y + 40)
+     .text(`DIČ: ${COMPANY_INFO.dic}`, 50, y + 52)
+     .text(`IČ DPH: ${COMPANY_INFO.vatNumber}`, 50, y + 64);
+}
+
+/**
+ * Draw customer information
+ */
+function drawCustomerInfo(doc, invoiceData) {
+  let y = 220;
+  
+  doc.fontSize(12)
+     .font('Helvetica-Bold')
+     .fillColor(COLORS.eucalyptusGreen)
+     .text('Odberateľ / Vevő', 50, y);
+  
+  y += 20;
+  doc.font('Helvetica')
+     .fillColor(COLORS.darkGray)
+     .fontSize(10)
+     .text(invoiceData.customerName || 'Zákazník / Vásárló', 50, y);
+  
+  if (invoiceData.customerPhone) {
+    doc.text(`Tel: ${invoiceData.customerPhone}`, 50, y + 12);
+    y += 12;
   }
+  
+  if (invoiceData.customerEmail) {
+    doc.text(`Email: ${invoiceData.customerEmail}`, 50, y + 12);
+  }
+}
+
+/**
+ * Draw items table
+ */
+function drawItemsTable(doc, invoiceData) {
+  let y = 300;
+  
+  // Table headers
+  doc.fontSize(10)
+     .font('Helvetica-Bold')
+     .fillColor(COLORS.darkGray);
+  
+  // Header background
+  doc.rect(50, y, 495, 20)
+     .fill(COLORS.veryLightGray);
+  
+  // Header text
+  doc.fillColor(COLORS.darkGray)
+     .text('Položka / Tétel', 55, y + 6)
+     .text('Mn. / Mny.', 300, y + 6)
+     .text('Jedn. cena / Egységár', 350, y + 6)
+     .text('Spolu / Összesen', 470, y + 6);
+  
+  y += 25;
+  
+  // Items
+  doc.font('Helvetica').fontSize(9);
+  
+  const items = invoiceData.orderItems || [];
+  
+  items.forEach((item, index) => {
+    if (y > 700) { // New page if needed
+      doc.addPage();
+      y = 50;
+    }
+    
+    // Handle different item name formats
+    let displayName = item.name || 'Unknown Item';
+    
+    // If we have slug, try to translate
+    if (item.slug) {
+      const itemNameSk = translateMenuItem(item.slug, 'sk');
+      const itemNameHu = translateMenuItem(item.slug, 'hu');
+      displayName = `${itemNameSk} / ${itemNameHu}`;
+    }
+    
+    // Item row
+    doc.fillColor(COLORS.darkGray)
+       .text(displayName, 55, y, { width: 240 })
+       .text((item.quantity || 1).toString(), 300, y)
+       .text(formatCurrency(item.unitPrice || item.price || 0), 350, y)
+       .text(formatCurrency(item.totalPrice || 0), 470, y);
+    
+    // Customizations (if any)
+    if (item.customizations) {
+      y += 12;
+      doc.fontSize(8)
+         .fillColor(COLORS.lightGray)
+         .text(`• ${item.customizations}`, 60, y);
+    }
+    
+    y += 20;
+    
+    // Line separator
+    if (index < items.length - 1) {
+      doc.strokeColor('#eeeeee')
+         .lineWidth(0.5)
+         .moveTo(55, y - 5)
+         .lineTo(540, y - 5)
+         .stroke();
+    }
+  });
+  
+  // Table bottom border
+  doc.strokeColor(COLORS.eucalyptusGreen)
+     .lineWidth(1)
+     .moveTo(50, y)
+     .lineTo(545, y)
+     .stroke();
+  
+  return y + 20;
+}
+
+/**
+ * Draw totals section with YOUR VAT CALCULATION
+ */
+function drawTotals(doc, invoiceData, startY) {
+  let y = Math.max(startY, 500);
+  
+  const breakdown = calculateVATBreakdown(invoiceData.totalGross);
+  
+  // Totals box
+  doc.rect(300, y, 245, 120)
+     .stroke(COLORS.lightGray);
+  
+  y += 15;
+  
+  // Subtotal
+  doc.fontSize(10)
+     .fillColor(COLORS.darkGray)
+     .text('Medzisúčet / Részösszeg:', 310, y)
+     .text(formatCurrency(invoiceData.subtotal || breakdown.netAmount), 480, y, { align: 'right' });
+  
+  // Delivery fee (if applicable)
+  if (invoiceData.deliveryFee && invoiceData.deliveryFee > 0) {
+    y += 15;
+    doc.text('Poplatok za doručenie / Szállítási díj:', 310, y)
+       .text(formatCurrency(invoiceData.deliveryFee), 480, y, { align: 'right' });
+  }
+  
+  // VAT base
+  y += 15;
+  doc.text('Základ DPH 19% / ÁFA alap 19%:', 310, y)
+     .text(formatCurrency(breakdown.netAmount), 480, y, { align: 'right' });
+  
+  // VAT amount
+  y += 15;
+  doc.text('DPH 19% / ÁFA 19%:', 310, y)
+     .text(formatCurrency(breakdown.vatAmount), 480, y, { align: 'right' });
+  
+  // Total line
+  y += 20;
+  doc.strokeColor(COLORS.eucalyptusGreen)
+     .lineWidth(1)
+     .moveTo(310, y)
+     .lineTo(535, y)
+     .stroke();
+  
+  // Final total
+  y += 10;
+  doc.fontSize(12)
+     .font('Helvetica-Bold')
+     .fillColor(COLORS.rusticRed)
+     .text('CELKOM / VÉGÖSSZEG:', 310, y)
+     .text(formatCurrency(invoiceData.totalGross), 480, y, { align: 'right' });
+}
+
+/**
+ * Draw footer with payment info
+ */
+function drawFooter(doc, invoiceData) {
+  let y = 650;
+  
+  // Payment method
+  const paymentMethods = {
+    'CASH': 'Hotovosť / Készpénz',
+    'CARD': 'Karta / Kártya',
+    'ONLINE': 'Online platba / Online fizetés'
+  };
+  
+  doc.fontSize(10)
+     .font('Helvetica-Bold')
+     .fillColor(COLORS.eucalyptusGreen)
+     .text('Spôsob platby / Fizetési mód:', 50, y);
+  
+  doc.font('Helvetica')
+     .fillColor(COLORS.darkGray)
+     .text(paymentMethods[invoiceData.paymentMethod] || invoiceData.paymentMethod, 200, y);
+  
+  // Payment status
+  y += 15;
+  doc.font('Helvetica-Bold')
+     .fillColor(COLORS.rusticRed)
+     .text('UHRADENÉ / KIFIZETVE', 50, y);
+  
+  // Footer note
+  y += 40;
+  doc.fontSize(8)
+     .fillColor(COLORS.lightGray)
+     .text('Ďakujeme za vašu návštevu! / Köszönjük a látogatást!', 50, y)
+     .text('Palace Cafe & Street Food - Autentické chute od 2016', 50, y + 12);
 }
 
 module.exports = {
@@ -458,5 +508,6 @@ module.exports = {
   getNextInvoiceCounter,
   calculateVATBreakdown,
   formatCurrency,
-  COMPANY_INFO
+  COMPANY_INFO,
+  TRANSLATIONS
 };
