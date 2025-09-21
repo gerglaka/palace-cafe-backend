@@ -168,12 +168,39 @@ function translateMenuItem(slug, language = 'sk') {
   return slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 }
 
+function testPDFText() {
+  const testStrings = [
+    'FAKTÚRA',
+    'Daňový doklad', 
+    'Dodávateľ',
+    'Test ľščťžýáí'
+  ];
+  
+  testStrings.forEach(str => {
+    console.log(`Original: ${str}`);
+    console.log(`Bytes: ${Buffer.from(str, 'utf8')}`);
+    console.log(`Length: ${str.length}`);
+    console.log('---');
+  });
+}
+
 /**
  * Generate invoice PDF with proper UTF-8 encoding
  */
 function generateInvoicePDF(invoiceData) {
   return new Promise((resolve, reject) => {
     try {
+
+      console.log('🔍 DEBUG - Invoice data received:');
+      console.log('Customer name:', invoiceData.customerName);
+      console.log('Invoice number:', invoiceData.invoiceNumber);
+      console.log('Order items:', JSON.stringify(invoiceData.orderItems, null, 2));
+      
+      // Check for encoding issues in customer data
+      if (invoiceData.customerName) {
+        console.log('Customer name bytes:', Buffer.from(invoiceData.customerName, 'utf8'));
+      }
+
       // Create PDF with proper font support for Unicode characters
       const doc = new PDFDocument({ 
         size: 'A4', 
@@ -186,6 +213,8 @@ function generateInvoicePDF(invoiceData) {
           Author: COMPANY_INFO.name
         }
       });
+
+      doc.font('Helvetica');
 
       // Register Unicode-supporting fonts (download DejaVuSans from https://dejavu-fonts.github.io/Download.html and place in a 'fonts' directory relative to this script)
       let defaultFont = 'Helvetica';
