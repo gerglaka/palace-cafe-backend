@@ -225,7 +225,8 @@ const styles = StyleSheet.create({
   },
   totalsTable: {
     width: 250,
-    border: 1,
+    borderWidth: 1,
+    borderStyle: 'solid',
     borderColor: COLORS.lightGray
   },
   totalsRow: {
@@ -335,10 +336,10 @@ function createInvoiceDocument(invoiceData) {
             React.createElement(Text, { style: { fontWeight: 'bold' } }, 
               invoiceData.customerName || 'Zákazník'
             ),
-            invoiceData.customerPhone && 
-              React.createElement(Text, null, `Tel: ${invoiceData.customerPhone}`),
-            invoiceData.customerEmail && 
-              React.createElement(Text, null, `Email: ${invoiceData.customerEmail}`)
+            invoiceData.customerPhone ? 
+              React.createElement(Text, null, `Tel: ${invoiceData.customerPhone}`) : null,
+            invoiceData.customerEmail ? 
+              React.createElement(Text, null, `Email: ${invoiceData.customerEmail}`) : null
           )
         )
       ),
@@ -387,11 +388,11 @@ function createInvoiceDocument(invoiceData) {
             React.createElement(Text, null, formatCurrency(invoiceData.subtotal || vatBreakdown.netAmount))
           ),
           
-          invoiceData.deliveryFee && invoiceData.deliveryFee > 0 &&
+          invoiceData.deliveryFee && invoiceData.deliveryFee > 0 ?
             React.createElement(View, { style: styles.totalsRow },
               React.createElement(Text, null, "Poplatok za doručenie:"),
               React.createElement(Text, null, formatCurrency(invoiceData.deliveryFee))
-            ),
+            ) : null,
           
           React.createElement(View, { style: styles.totalsRow },
             React.createElement(Text, null, "Základ DPH 19%:"),
