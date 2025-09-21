@@ -178,25 +178,23 @@ function generateInvoicePDF(invoiceData) {
         size: 'A4', 
         margin: 50,
         bufferPages: true,
-        compress:false,
+        compress: false,
         info: {
           Title: `Faktúra ${invoiceData.invoiceNumber}`,
           Subject: 'Palace Cafe & Street Food - Faktúra',
           Author: COMPANY_INFO.name
         }
       });
-      
-      //// Register font for Unicode support (fallback to built-in if not available)
-      //try {
-      //  // You can add custom fonts here if needed
-      //  // doc.registerFont('CustomFont', 'path/to/unicode-font.ttf');
-      //  // doc.font('CustomFont');
-      //} catch (fontError) {
-      //  console.log('Using default font for Unicode support');
-      //}
 
-      doc.font('Times-Roman');
-      
+      // Register Unicode-supporting fonts (download DejaVuSans from https://dejavu-fonts.github.io/ and place in a 'fonts' directory)
+      const fontPath = path.join(__dirname, 'fonts/DejaVuSans.ttf');
+      const boldFontPath = path.join(__dirname, 'fonts/DejaVuSans-Bold.ttf');
+      doc.registerFont('DejaVu', fontPath);
+      doc.registerFont('DejaVu-Bold', boldFontPath);
+
+      // Set default font
+      doc.font('DejaVu');
+
       const buffers = [];
       doc.on('data', buffers.push.bind(buffers));
       doc.on('end', () => {
@@ -267,24 +265,24 @@ function drawInvoiceInfo(doc, invoiceData) {
   doc.fontSize(12)
      .fillColor(COLORS.darkGray)
      .text('Číslo faktúry / Számla száma:', 350, y)
-     .font('Helvetica-Bold')
+     .font('DejaVu-Bold')
      .fillColor(COLORS.rusticRed)
      .text(invoiceData.invoiceNumber, 350, y + 15);
   
   // Dates
   y += 40;
-  doc.font('Helvetica')
+  doc.font('DejaVu')
      .fillColor(COLORS.darkGray)
      .fontSize(10)
      .text('Dátum vystavenia / Kiállítás dátuma:', 350, y)
      .text(formatDate(invoiceData.createdAt), 350, y + 12)
-     .text('Dátum splatnosti / Esedékesség:', 350, y + 30)
+     .text('Dátum splatnosti / Esedékesség dátuma:', 350, y + 30)
      .text(formatDate(invoiceData.createdAt), 350, y + 42);
   
   // Order info
   y += 70;
   doc.text('Číslo objednávky / Rendelés száma:', 350, y)
-     .font('Helvetica-Bold')
+     .font('DejaVu-Bold')
      .text(`#${invoiceData.order?.orderNumber || 'N/A'}`, 350, y + 12);
 }
 
@@ -295,12 +293,12 @@ function drawCompanyInfo(doc) {
   let y = 120;
   
   doc.fontSize(12)
-     .font('Helvetica-Bold')
+     .font('DejaVu-Bold')
      .fillColor(COLORS.eucalyptusGreen)
      .text('Dodávateľ / Szállító', 50, y);
   
   y += 20;
-  doc.font('Helvetica')
+  doc.font('DejaVu')
      .fillColor(COLORS.darkGray)
      .fontSize(10)
      .text(COMPANY_INFO.name, 50, y)
@@ -318,12 +316,12 @@ function drawCustomerInfo(doc, invoiceData) {
   let y = 220;
   
   doc.fontSize(12)
-     .font('Helvetica-Bold')
+     .font('DejaVu-Bold')
      .fillColor(COLORS.eucalyptusGreen)
      .text('Odberateľ / Vevő', 50, y);
   
   y += 20;
-  doc.font('Helvetica')
+  doc.font('DejaVu')
      .fillColor(COLORS.darkGray)
      .fontSize(10)
      .text(invoiceData.customerName || 'Zákazník / Vásárló', 50, y);
@@ -346,7 +344,7 @@ function drawItemsTable(doc, invoiceData) {
   
   // Table headers
   doc.fontSize(10)
-     .font('Helvetica-Bold')
+     .font('DejaVu-Bold')
      .fillColor(COLORS.darkGray);
   
   // Header background
@@ -363,7 +361,7 @@ function drawItemsTable(doc, invoiceData) {
   y += 25;
   
   // Items
-  doc.font('Helvetica').fontSize(9);
+  doc.font('DejaVu').fontSize(9);
   
   const items = invoiceData.orderItems || [];
   
@@ -468,7 +466,7 @@ function drawTotals(doc, invoiceData, startY) {
   // Final total
   y += 10;
   doc.fontSize(12)
-     .font('Helvetica-Bold')
+     .font('DejaVu-Bold')
      .fillColor(COLORS.rusticRed)
      .text('CELKOM / VÉGÖSSZEG:', 310, y)
      .text(formatCurrency(invoiceData.totalGross), 480, y, { align: 'right' });
@@ -488,17 +486,17 @@ function drawFooter(doc, invoiceData) {
   };
   
   doc.fontSize(10)
-     .font('Helvetica-Bold')
+     .font('DejaVu-Bold')
      .fillColor(COLORS.eucalyptusGreen)
      .text('Spôsob platby / Fizetési mód:', 50, y);
   
-  doc.font('Helvetica')
+  doc.font('DejaVu')
      .fillColor(COLORS.darkGray)
      .text(paymentMethods[invoiceData.paymentMethod] || invoiceData.paymentMethod, 200, y);
   
   // Payment status
   y += 15;
-  doc.font('Helvetica-Bold')
+  doc.font('DejaVu-Bold')
      .fillColor(COLORS.rusticRed)
      .text('UHRADENÉ / KIFIZETVE', 50, y);
   
