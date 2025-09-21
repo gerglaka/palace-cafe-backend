@@ -17,6 +17,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@fontsource/roboto": "^5.2.8",
     "@prisma/client": "^6.14.0",
     "@sendgrid/mail": "^8.1.6",
     "bcrypt": "^6.0.0",

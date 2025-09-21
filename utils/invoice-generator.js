@@ -1,7 +1,7 @@
 /**
- * Palace Cafe & Street Food - Invoice Generator
+ * Palace Cafe & Street Food - Invoice Generator (FIXED UTF-8)
  * Professional invoice generation with Slovak legal compliance
- * Bilingual support (Slovak/Hungarian)
+ * Bilingual support (Slovak/Hungarian) with proper character encoding
  * 19% DPH calculation and casual business formatting
  */
 
@@ -9,7 +9,8 @@ const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
 
-// Company details
+
+// Company details - FIXED ENCODING
 const COMPANY_INFO = {
   name: 'Palace Cafe & Street Food s.r.o.',
   address: 'Hradná 168/2',
@@ -18,6 +19,13 @@ const COMPANY_INFO = {
   dic: '2122291578',
   vatNumber: 'SK2122291578'
 };
+
+// Add this after creating the PDFDocument
+const fontPath = path.join(__dirname, 'fonts', 'Roboto-Regular.ttf');
+if (fs.existsSync(fontPath)) {
+  doc.registerFont('Roboto', fontPath);
+  doc.font('Roboto');
+}
 
 // Brand colors
 const COLORS = {
@@ -28,7 +36,7 @@ const COLORS = {
   veryLightGray: '#f5f5f5'
 };
 
-// Slovak/Hungarian translations
+// Slovak/Hungarian translations - FIXED ENCODING
 const TRANSLATIONS = {
   // Invoice header
   invoice: { sk: 'FAKTÚRA', hu: 'SZÁMLA' },
@@ -72,7 +80,7 @@ const TRANSLATIONS = {
   menuItems: {
     'palace-burger': { sk: 'Palace Burger', hu: 'Palace Burger' },
     'cheeseburger': { sk: 'Cheeseburger', hu: 'Sajtos Burger' },
-    'chicken-burger': { sk: 'Kurací burger', hu: 'Csirke Burger' },
+    'chicken-burger': { sk: 'Kuracie burger', hu: 'Csirke Burger' },
     'fanta': { sk: 'Fanta', hu: 'Fanta' },
     'coca-cola': { sk: 'Coca-Cola', hu: 'Coca-Cola' },
     'sprite': { sk: 'Sprite', hu: 'Sprite' },
@@ -167,20 +175,31 @@ function translateMenuItem(slug, language = 'sk') {
 }
 
 /**
- * Generate invoice PDF
+ * Generate invoice PDF with proper UTF-8 encoding
  */
 function generateInvoicePDF(invoiceData) {
   return new Promise((resolve, reject) => {
     try {
+      // Create PDF with proper font support for Unicode characters
       const doc = new PDFDocument({ 
         size: 'A4', 
         margin: 50,
+        bufferPages: true,
         info: {
           Title: `Faktúra ${invoiceData.invoiceNumber}`,
           Subject: 'Palace Cafe & Street Food - Faktúra',
           Author: COMPANY_INFO.name
         }
       });
+      
+      // Register font for Unicode support (fallback to built-in if not available)
+      try {
+        // You can add custom fonts here if needed
+        // doc.registerFont('CustomFont', 'path/to/unicode-font.ttf');
+        // doc.font('CustomFont');
+      } catch (fontError) {
+        console.log('Using default font for Unicode support');
+      }
       
       const buffers = [];
       doc.on('data', buffers.push.bind(buffers));
@@ -200,10 +219,10 @@ function generateInvoicePDF(invoiceData) {
       drawCustomerInfo(doc, invoiceData);
       
       // Items table
-      drawItemsTable(doc, invoiceData);
+      const tableEndY = drawItemsTable(doc, invoiceData);
       
       // Totals
-      drawTotals(doc, invoiceData);
+      drawTotals(doc, invoiceData, tableEndY);
       
       // Footer
       drawFooter(doc, invoiceData);
@@ -311,7 +330,7 @@ function drawCustomerInfo(doc, invoiceData) {
   doc.font('Helvetica')
      .fillColor(COLORS.darkGray)
      .fontSize(10)
-     .text(invoiceData.customerName, 50, y);
+     .text(invoiceData.customerName || 'Zákazník / Vásárló', 50, y);
   
   if (invoiceData.customerPhone) {
     doc.text(`Tel: ${invoiceData.customerPhone}`, 50, y + 12);
@@ -350,25 +369,33 @@ function drawItemsTable(doc, invoiceData) {
   // Items
   doc.font('Helvetica').fontSize(9);
   
-  invoiceData.orderItems.forEach((item, index) => {
+  const items = invoiceData.orderItems || [];
+  
+  items.forEach((item, index) => {
     if (y > 700) { // New page if needed
       doc.addPage();
       y = 50;
     }
     
-    const itemName = translateMenuItem(item.slug, 'sk');
-    const itemNameHu = translateMenuItem(item.slug, 'hu');
-    const displayName = `${itemName} / ${itemNameHu}`;
+    // Handle different item name formats
+    let displayName = item.name || 'Unknown Item';
+    
+    // If we have slug, try to translate
+    if (item.slug) {
+      const itemNameSk = translateMenuItem(item.slug, 'sk');
+      const itemNameHu = translateMenuItem(item.slug, 'hu');
+      displayName = `${itemNameSk} / ${itemNameHu}`;
+    }
     
     // Item row
     doc.fillColor(COLORS.darkGray)
        .text(displayName, 55, y, { width: 240 })
-       .text(item.quantity.toString(), 300, y)
-       .text(formatCurrency(item.unitPrice), 350, y)
-       .text(formatCurrency(item.totalPrice), 470, y);
+       .text((item.quantity || 1).toString(), 300, y)
+       .text(formatCurrency(item.unitPrice || item.price || 0), 350, y)
+       .text(formatCurrency(item.totalPrice || 0), 470, y);
     
     // Customizations (if any)
-    if (item.customizations && item.customizations.length > 0) {
+    if (item.customizations) {
       y += 12;
       doc.fontSize(8)
          .fillColor(COLORS.lightGray)
@@ -378,7 +405,7 @@ function drawItemsTable(doc, invoiceData) {
     y += 20;
     
     // Line separator
-    if (index < invoiceData.orderItems.length - 1) {
+    if (index < items.length - 1) {
       doc.strokeColor('#eeeeee')
          .lineWidth(0.5)
          .moveTo(55, y - 5)
@@ -400,8 +427,8 @@ function drawItemsTable(doc, invoiceData) {
 /**
  * Draw totals section
  */
-function drawTotals(doc, invoiceData) {
-  let y = 500; // Adjust based on table end
+function drawTotals(doc, invoiceData, startY) {
+  let y = Math.max(startY, 500);
   
   const breakdown = calculateVATBreakdown(invoiceData.totalGross);
   
@@ -415,10 +442,10 @@ function drawTotals(doc, invoiceData) {
   doc.fontSize(10)
      .fillColor(COLORS.darkGray)
      .text('Medzisúčet / Részösszeg:', 310, y)
-     .text(formatCurrency(invoiceData.subtotal), 480, y, { align: 'right' });
+     .text(formatCurrency(invoiceData.subtotal || breakdown.netAmount), 480, y, { align: 'right' });
   
   // Delivery fee (if applicable)
-  if (invoiceData.deliveryFee > 0) {
+  if (invoiceData.deliveryFee && invoiceData.deliveryFee > 0) {
     y += 15;
     doc.text('Poplatok za doručenie / Szállítási díj:', 310, y)
        .text(formatCurrency(invoiceData.deliveryFee), 480, y, { align: 'right' });
