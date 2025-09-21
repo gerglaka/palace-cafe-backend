@@ -840,7 +840,7 @@ app.post('/api/stripe/create-payment-intent', orderLimiter, asyncHandler(async (
   console.log('- Customer:', orderData?.customerName);
 
   // Validation
-  if (!amount || amount < 50) { // Minimum 50 cents
+  if (!amount || amount < 0.50) { // Minimum 50 cents
     return res.status(400).json({
       success: false,
       error: 'Invalid amount. Minimum payment is €0.50'
