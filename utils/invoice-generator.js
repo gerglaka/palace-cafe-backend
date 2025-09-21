@@ -1,11 +1,15 @@
 /**
- * Palace Cafe & Street Food - NEW Invoice Generator
- * Clean implementation with Puppeteer (HTML to PDF)
+ * Palace Cafe & Street Food - PDFmake Invoice Generator
+ * Reliable server-friendly PDF generation with proper UTF-8 support
  * Uses your exact VAT calculation: VAT = GROSS * 0.19, NET = GROSS - VAT
- * Slovak language only, proper UTF-8 support
+ * Slovak language only
  */
 
-const puppeteer = require('puppeteer');
+const pdfMake = require('pdfmake/build/pdfmake');
+const pdfFonts = require('pdfmake/build/vfs_fonts');
+
+// Set up fonts for PDFmake
+pdfMake.vfs = pdfFonts.pdfMake.vfs;
 
 // Company details
 const COMPANY_INFO = {
@@ -17,7 +21,7 @@ const COMPANY_INFO = {
   vatNumber: 'SK2122291578'
 };
 
-// Brand colors
+// Brand colors (PDFmake uses arrays for RGB)
 const COLORS = {
   rusticRed: '#38141A',
   eucalyptusGreen: '#1D665D',
@@ -100,379 +104,335 @@ function formatDate(date) {
 }
 
 /**
- * Generate HTML template for invoice
+ * Generate invoice PDF using PDFmake
  */
-function generateInvoiceHTML(invoiceData) {
-  const vatBreakdown = calculateVATBreakdown(invoiceData.totalGross);
-  
-  // Payment method translations
-  const paymentMethods = {
-    'CASH': 'Hotovosť',
-    'CARD': 'Karta',
-    'ONLINE': 'Online platba'
-  };
+function generateInvoicePDF(invoiceData) {
+  return new Promise((resolve, reject) => {
+    try {
+      console.log('🚀 Starting PDFmake invoice generation...');
+      
+      const vatBreakdown = calculateVATBreakdown(invoiceData.totalGross);
+      
+      // Payment method translations
+      const paymentMethods = {
+        'CASH': 'Hotovosť',
+        'CARD': 'Karta',
+        'ONLINE': 'Online platba'
+      };
 
-  return `
-<!DOCTYPE html>
-<html lang="sk">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Faktúra ${invoiceData.invoiceNumber}</title>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-        
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Inter', Arial, sans-serif;
-            font-size: 12px;
-            line-height: 1.4;
-            color: ${COLORS.darkGray};
-            background: white;
-        }
-        
-        .invoice-container {
-            max-width: 210mm;
-            margin: 0 auto;
-            padding: 20mm;
-            background: white;
-        }
-        
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 30px;
-            border-bottom: 3px solid ${COLORS.eucalyptusGreen};
-            padding-bottom: 20px;
-        }
-        
-        .company-name {
-            font-size: 24px;
-            font-weight: 700;
-            color: ${COLORS.rusticRed};
-            margin-bottom: 5px;
-        }
-        
-        .invoice-title {
-            font-size: 20px;
-            font-weight: 600;
-            color: ${COLORS.eucalyptusGreen};
-            text-align: right;
-        }
-        
-        .invoice-subtitle {
-            font-size: 10px;
-            color: ${COLORS.lightGray};
-            text-align: right;
-            margin-top: 5px;
-        }
-        
-        .info-section {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 30px;
-        }
-        
-        .info-block {
-            width: 48%;
-        }
-        
-        .info-title {
-            font-size: 14px;
-            font-weight: 600;
-            color: ${COLORS.eucalyptusGreen};
-            margin-bottom: 10px;
-        }
-        
-        .info-content {
-            font-size: 11px;
-            line-height: 1.5;
-        }
-        
-        .invoice-details {
-            background: ${COLORS.veryLightGray};
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-        }
-        
-        .invoice-number {
-            font-size: 16px;
-            font-weight: 700;
-            color: ${COLORS.rusticRed};
-            margin-bottom: 10px;
-        }
-        
-        .items-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 20px;
-        }
-        
-        .items-table th {
-            background: ${COLORS.eucalyptusGreen};
-            color: white;
-            padding: 12px 8px;
-            text-align: left;
-            font-weight: 600;
-            font-size: 11px;
-        }
-        
-        .items-table td {
-            padding: 10px 8px;
-            border-bottom: 1px solid #eee;
-            font-size: 11px;
-        }
-        
-        .items-table tr:nth-child(even) {
-            background: #fafafa;
-        }
-        
-        .customizations {
-            font-size: 9px;
-            color: ${COLORS.lightGray};
-            font-style: italic;
-            margin-top: 3px;
-        }
-        
-        .totals-section {
-            display: flex;
-            justify-content: flex-end;
-            margin-bottom: 30px;
-        }
-        
-        .totals-box {
-            width: 300px;
-            border: 2px solid ${COLORS.lightGray};
-            border-radius: 5px;
-            overflow: hidden;
-        }
-        
-        .totals-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 8px 15px;
-            border-bottom: 1px solid #eee;
-        }
-        
-        .totals-row.final {
-            background: ${COLORS.eucalyptusGreen};
-            color: white;
-            font-weight: 700;
-            font-size: 14px;
-            border-bottom: none;
-        }
-        
-        .footer {
-            margin-top: 40px;
-            padding-top: 20px;
-            border-top: 1px solid #eee;
-        }
-        
-        .payment-info {
-            margin-bottom: 15px;
-        }
-        
-        .payment-method {
-            font-weight: 600;
-            color: ${COLORS.eucalyptusGreen};
-        }
-        
-        .payment-status {
-            font-weight: 700;
-            color: ${COLORS.rusticRed};
-            font-size: 14px;
-            margin: 10px 0;
-        }
-        
-        .footer-note {
-            font-size: 10px;
-            color: ${COLORS.lightGray};
-            text-align: center;
-            margin-top: 20px;
-        }
-        
-        @media print {
-            .invoice-container {
-                margin: 0;
-                padding: 15mm;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="invoice-container">
-        <!-- Header -->
-        <div class="header">
-            <div>
-                <div class="company-name">${COMPANY_INFO.name}</div>
-            </div>
-            <div>
-                <div class="invoice-title">FAKTÚRA</div>
-                <div class="invoice-subtitle">Daňový doklad</div>
-            </div>
-        </div>
-        
-        <!-- Invoice Details -->
-        <div class="invoice-details">
-            <div class="invoice-number">Číslo faktúry: ${invoiceData.invoiceNumber}</div>
-            <div><strong>Dátum vystavenia:</strong> ${formatDate(invoiceData.createdAt)}</div>
-            <div><strong>Dátum splatnosti:</strong> ${formatDate(invoiceData.createdAt)}</div>
-            <div><strong>Číslo objednávky:</strong> #${invoiceData.order?.orderNumber || 'N/A'}</div>
-        </div>
-        
-        <!-- Company and Customer Info -->
-        <div class="info-section">
-            <div class="info-block">
-                <div class="info-title">Dodávateľ</div>
-                <div class="info-content">
-                    <strong>${COMPANY_INFO.name}</strong><br>
-                    ${COMPANY_INFO.address}<br>
-                    ${COMPANY_INFO.city}<br><br>
-                    <strong>IČO:</strong> ${COMPANY_INFO.ico}<br>
-                    <strong>DIČ:</strong> ${COMPANY_INFO.dic}<br>
-                    <strong>IČ DPH:</strong> ${COMPANY_INFO.vatNumber}
-                </div>
-            </div>
-            
-            <div class="info-block">
-                <div class="info-title">Odberateľ</div>
-                <div class="info-content">
-                    <strong>${invoiceData.customerName || 'Zákazník'}</strong><br>
-                    ${invoiceData.customerPhone ? `Tel: ${invoiceData.customerPhone}<br>` : ''}
-                    ${invoiceData.customerEmail ? `Email: ${invoiceData.customerEmail}<br>` : ''}
-                </div>
-            </div>
-        </div>
-        
-        <!-- Items Table -->
-        <table class="items-table">
-            <thead>
-                <tr>
-                    <th style="width: 50%">Položka</th>
-                    <th style="width: 10%">Mn.</th>
-                    <th style="width: 20%">Jedn. cena</th>
-                    <th style="width: 20%">Spolu</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${(invoiceData.orderItems || []).map(item => `
-                    <tr>
-                        <td>
-                            <strong>${item.name || 'Unknown Item'}</strong>
-                            ${item.customizations ? `<div class="customizations">• ${item.customizations}</div>` : ''}
-                        </td>
-                        <td>${item.quantity || 1}</td>
-                        <td>${formatCurrency(item.unitPrice || item.price || 0)}</td>
-                        <td>${formatCurrency(item.totalPrice || 0)}</td>
-                    </tr>
-                `).join('')}
-            </tbody>
-        </table>
-        
-        <!-- Totals -->
-        <div class="totals-section">
-            <div class="totals-box">
-                <div class="totals-row">
-                    <span>Medzisúčet:</span>
-                    <span>${formatCurrency(invoiceData.subtotal || vatBreakdown.netAmount)}</span>
-                </div>
-                ${invoiceData.deliveryFee && invoiceData.deliveryFee > 0 ? `
-                <div class="totals-row">
-                    <span>Poplatok za doručenie:</span>
-                    <span>${formatCurrency(invoiceData.deliveryFee)}</span>
-                </div>
-                ` : ''}
-                <div class="totals-row">
-                    <span>Základ DPH 19%:</span>
-                    <span>${formatCurrency(vatBreakdown.netAmount)}</span>
-                </div>
-                <div class="totals-row">
-                    <span>DPH 19%:</span>
-                    <span>${formatCurrency(vatBreakdown.vatAmount)}</span>
-                </div>
-                <div class="totals-row final">
-                    <span>CELKOM:</span>
-                    <span>${formatCurrency(invoiceData.totalGross)}</span>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Footer -->
-        <div class="footer">
-            <div class="payment-info">
-                <strong>Spôsob platby:</strong> 
-                <span class="payment-method">${paymentMethods[invoiceData.paymentMethod] || invoiceData.paymentMethod}</span>
-            </div>
-            
-            <div class="payment-status">UHRADENÉ</div>
-            
-            <div class="footer-note">
-                Ďakujeme za vašu návštevu!<br>
-                Palace Cafe & Street Food - Autentické chute od 2016
-            </div>
-        </div>
-    </div>
-</body>
-</html>
-  `;
-}
+      // Create items table data
+      const itemsTableBody = [
+        // Header row
+        [
+          { text: 'Položka', style: 'tableHeader' },
+          { text: 'Mn.', style: 'tableHeader', alignment: 'center' },
+          { text: 'Jedn. cena', style: 'tableHeader', alignment: 'right' },
+          { text: 'Spolu', style: 'tableHeader', alignment: 'right' }
+        ]
+      ];
 
-/**
- * Generate invoice PDF using Puppeteer
- */
-async function generateInvoicePDF(invoiceData) {
-  let browser = null;
-  
-  try {
-    console.log('🚀 Starting Puppeteer invoice generation...');
-    
-    // Launch browser
-    browser = await puppeteer.launch({
-      headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-    
-    const page = await browser.newPage();
-    
-    // Generate HTML content
-    const htmlContent = generateInvoiceHTML(invoiceData);
-    
-    // Set HTML content
-    await page.setContent(htmlContent, {
-      waitUntil: 'networkidle0'
-    });
-    
-    // Generate PDF
-    const pdfBuffer = await page.pdf({
-      format: 'A4',
-      margin: {
-        top: '10mm',
-        right: '10mm',
-        bottom: '10mm',
-        left: '10mm'
-      },
-      printBackground: true,
-      preferCSSPageSize: true
-    });
-    
-    console.log('✅ PDF generated successfully');
-    return pdfBuffer;
-    
-  } catch (error) {
-    console.error('❌ PDF generation failed:', error);
-    throw error;
-  } finally {
-    if (browser) {
-      await browser.close();
+      // Add items
+      (invoiceData.orderItems || []).forEach(item => {
+        const itemRow = [
+          {
+            text: [
+              { text: item.name || 'Unknown Item', style: 'itemName' },
+              item.customizations ? 
+                { text: `\n• ${item.customizations}`, style: 'itemCustomizations' } : 
+                ''
+            ]
+          },
+          { text: (item.quantity || 1).toString(), alignment: 'center' },
+          { text: formatCurrency(item.unitPrice || item.price || 0), alignment: 'right' },
+          { text: formatCurrency(item.totalPrice || 0), alignment: 'right' }
+        ];
+        itemsTableBody.push(itemRow);
+      });
+
+      // PDF document definition
+      const docDefinition = {
+        pageSize: 'A4',
+        pageMargins: [40, 40, 40, 40],
+        
+        content: [
+          // Header
+          {
+            columns: [
+              {
+                width: '60%',
+                text: COMPANY_INFO.name,
+                style: 'companyName'
+              },
+              {
+                width: '40%',
+                alignment: 'right',
+                stack: [
+                  { text: 'FAKTÚRA', style: 'invoiceTitle' },
+                  { text: 'Daňový doklad', style: 'invoiceSubtitle' }
+                ]
+              }
+            ],
+            margin: [0, 0, 0, 20]
+          },
+          
+          // Horizontal line
+          {
+            canvas: [
+              {
+                type: 'line',
+                x1: 0, y1: 0,
+                x2: 515, y2: 0,
+                lineWidth: 2,
+                lineColor: COLORS.eucalyptusGreen
+              }
+            ],
+            margin: [0, 0, 0, 20]
+          },
+          
+          // Invoice details box
+          {
+            table: {
+              widths: ['*'],
+              body: [
+                [{
+                  stack: [
+                    { text: `Číslo faktúry: ${invoiceData.invoiceNumber}`, style: 'invoiceNumber' },
+                    { text: `Dátum vystavenia: ${formatDate(invoiceData.createdAt)}`, style: 'invoiceDetail' },
+                    { text: `Dátum splatnosti: ${formatDate(invoiceData.createdAt)}`, style: 'invoiceDetail' },
+                    { text: `Číslo objednávky: #${invoiceData.order?.orderNumber || 'N/A'}`, style: 'invoiceDetail' }
+                  ],
+                  fillColor: COLORS.veryLightGray,
+                  margin: [10, 10, 10, 10]
+                }]
+              ]
+            },
+            layout: 'noBorders',
+            margin: [0, 0, 0, 20]
+          },
+          
+          // Company and customer info
+          {
+            columns: [
+              {
+                width: '48%',
+                stack: [
+                  { text: 'Dodávateľ', style: 'sectionTitle' },
+                  { text: COMPANY_INFO.name, style: 'companyDetail', bold: true },
+                  { text: COMPANY_INFO.address, style: 'companyDetail' },
+                  { text: COMPANY_INFO.city, style: 'companyDetail' },
+                  { text: '', margin: [0, 5] }, // Spacer
+                  { text: `IČO: ${COMPANY_INFO.ico}`, style: 'companyDetail' },
+                  { text: `DIČ: ${COMPANY_INFO.dic}`, style: 'companyDetail' },
+                  { text: `IČ DPH: ${COMPANY_INFO.vatNumber}`, style: 'companyDetail' }
+                ]
+              },
+              {
+                width: '4%',
+                text: '' // Spacer column
+              },
+              {
+                width: '48%',
+                stack: [
+                  { text: 'Odberateľ', style: 'sectionTitle' },
+                  { text: invoiceData.customerName || 'Zákazník', style: 'customerDetail', bold: true },
+                  invoiceData.customerPhone ? 
+                    { text: `Tel: ${invoiceData.customerPhone}`, style: 'customerDetail' } : {},
+                  invoiceData.customerEmail ? 
+                    { text: `Email: ${invoiceData.customerEmail}`, style: 'customerDetail' } : {}
+                ]
+              }
+            ],
+            margin: [0, 0, 0, 30]
+          },
+          
+          // Items table
+          {
+            table: {
+              headerRows: 1,
+              widths: ['50%', '10%', '20%', '20%'],
+              body: itemsTableBody
+            },
+            layout: {
+              fillColor: function (rowIndex) {
+                return (rowIndex === 0) ? COLORS.eucalyptusGreen : 
+                       (rowIndex % 2 === 0) ? '#fafafa' : null;
+              },
+              hLineWidth: function (i, node) {
+                return (i === 0 || i === 1 || i === node.table.body.length) ? 2 : 1;
+              },
+              vLineWidth: function () { return 1; },
+              hLineColor: function (i, node) {
+                return (i === 0 || i === 1 || i === node.table.body.length) ? 
+                  COLORS.eucalyptusGreen : '#eeeeee';
+              },
+              vLineColor: function () { return '#eeeeee'; }
+            },
+            margin: [0, 0, 0, 20]
+          },
+          
+          // Totals section
+          {
+            columns: [
+              { width: '60%', text: '' }, // Spacer
+              {
+                width: '40%',
+                table: {
+                  widths: ['60%', '40%'],
+                  body: [
+                    ['Medzisúčet:', { text: formatCurrency(invoiceData.subtotal || vatBreakdown.netAmount), alignment: 'right' }],
+                    ...(invoiceData.deliveryFee && invoiceData.deliveryFee > 0 ? 
+                      [['Poplatok za doručenie:', { text: formatCurrency(invoiceData.deliveryFee), alignment: 'right' }]] : 
+                      []
+                    ),
+                    ['Základ DPH 19%:', { text: formatCurrency(vatBreakdown.netAmount), alignment: 'right' }],
+                    ['DPH 19%:', { text: formatCurrency(vatBreakdown.vatAmount), alignment: 'right' }],
+                    [
+                      { text: 'CELKOM:', style: 'totalLabel' },
+                      { text: formatCurrency(invoiceData.totalGross), style: 'totalAmount', alignment: 'right' }
+                    ]
+                  ]
+                },
+                layout: {
+                  fillColor: function (rowIndex, node) {
+                    return (rowIndex === node.table.body.length - 1) ? COLORS.eucalyptusGreen : null;
+                  },
+                  hLineWidth: function (i, node) {
+                    return (i === node.table.body.length - 1) ? 2 : 1;
+                  },
+                  hLineColor: function (i, node) {
+                    return (i === node.table.body.length - 1) ? COLORS.eucalyptusGreen : COLORS.lightGray;
+                  }
+                }
+              }
+            ],
+            margin: [0, 0, 0, 30]
+          },
+          
+          // Footer
+          {
+            stack: [
+              {
+                text: [
+                  { text: 'Spôsob platby: ', style: 'footerLabel' },
+                  { text: paymentMethods[invoiceData.paymentMethod] || invoiceData.paymentMethod, style: 'footerValue' }
+                ],
+                margin: [0, 0, 0, 10]
+              },
+              { text: 'UHRADENÉ', style: 'paidStatus', margin: [0, 0, 0, 20] },
+              {
+                text: 'Ďakujeme za vašu návštevu!\nPalace Cafe & Street Food - Autentické chute od 2016',
+                style: 'footerNote',
+                alignment: 'center'
+              }
+            ]
+          }
+        ],
+        
+        // Styles definition
+        styles: {
+          companyName: {
+            fontSize: 18,
+            bold: true,
+            color: COLORS.rusticRed
+          },
+          invoiceTitle: {
+            fontSize: 16,
+            bold: true,
+            color: COLORS.eucalyptusGreen
+          },
+          invoiceSubtitle: {
+            fontSize: 9,
+            color: COLORS.lightGray,
+            margin: [0, 2, 0, 0]
+          },
+          invoiceNumber: {
+            fontSize: 14,
+            bold: true,
+            color: COLORS.rusticRed,
+            margin: [0, 0, 0, 5]
+          },
+          invoiceDetail: {
+            fontSize: 10,
+            margin: [0, 2, 0, 0]
+          },
+          sectionTitle: {
+            fontSize: 12,
+            bold: true,
+            color: COLORS.eucalyptusGreen,
+            margin: [0, 0, 0, 8]
+          },
+          companyDetail: {
+            fontSize: 9,
+            margin: [0, 1, 0, 0]
+          },
+          customerDetail: {
+            fontSize: 9,
+            margin: [0, 1, 0, 0]
+          },
+          tableHeader: {
+            fontSize: 10,
+            bold: true,
+            color: 'white',
+            margin: [5, 5, 5, 5]
+          },
+          itemName: {
+            fontSize: 10,
+            bold: true
+          },
+          itemCustomizations: {
+            fontSize: 8,
+            color: COLORS.lightGray,
+            italics: true
+          },
+          totalLabel: {
+            fontSize: 12,
+            bold: true,
+            color: 'white'
+          },
+          totalAmount: {
+            fontSize: 12,
+            bold: true,
+            color: 'white'
+          },
+          footerLabel: {
+            fontSize: 10,
+            bold: true
+          },
+          footerValue: {
+            fontSize: 10,
+            color: COLORS.eucalyptusGreen
+          },
+          paidStatus: {
+            fontSize: 12,
+            bold: true,
+            color: COLORS.rusticRed
+          },
+          footerNote: {
+            fontSize: 8,
+            color: COLORS.lightGray
+          }
+        },
+        
+        defaultStyle: {
+          font: 'Helvetica',
+          fontSize: 10,
+          color: COLORS.darkGray
+        }
+      };
+
+      // Generate PDF
+      const pdfDoc = pdfMake.createPdf(docDefinition);
+      
+      pdfDoc.getBuffer((buffer) => {
+        console.log('✅ PDFmake invoice generated successfully');
+        resolve(buffer);
+      });
+
+    } catch (error) {
+      console.error('❌ PDFmake invoice generation failed:', error);
+      reject(error);
     }
-  }
+  });
 }
 
 module.exports = {
