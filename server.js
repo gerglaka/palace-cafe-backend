@@ -1093,7 +1093,7 @@ app.post('/api/stripe/confirm-payment', orderLimiter, asyncHandler(async (req, r
     const order = await prisma.order.create({
       data: {
         orderNumber: generateOrderNumber(),
-        status: 'CONFIRMED', // Card payments start as confirmed
+        status: 'PENDING', 
         orderType,
         paymentMethod: 'CARD', // Use CARD for Stripe payments
         paymentStatus: 'COMPLETED', // Payment already processed
