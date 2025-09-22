@@ -43,7 +43,7 @@ function initializeSendGrid() {
  */
 async function sendOrderStatusEmail(orderData, customerEmail) {
   try {
-    console.log(`📧 Preparing SendGrid status email for ${customerEmail}`);
+    console.log(`Preparing simple status email for ${customerEmail}`);
     
     if (!customerEmail) {
       return { success: false, error: 'No email address provided' };
@@ -57,17 +57,19 @@ async function sendOrderStatusEmail(orderData, customerEmail) {
       }
     }
 
-    // Generate content based on status
-    let statusMessage, statusMessageHu, subject;
+    // Simple content based on status
+    let subject, headerText, mainMessage, subMessage;
     
     if (orderData.status === 'READY') {
-      subject = `Objednávka #${orderData.orderNumber} je pripravená na vyzdvihnutie - Palace Cafe`;
-      statusMessage = 'Vaša objednávka je pripravená na vyzdvihnutie!';
-      statusMessageHu = 'Az Ön rendelése készen áll az átvételre!';
+      subject = `Objednavka ${orderData.orderNumber} je pripravena - Palace Cafe`;
+      headerText = 'Objednavka pripravena na vyzdvihnutie / Rendeles keszre kesz atvevellre';
+      mainMessage = 'Vasa objednavka je pripravena na vyzdvihnutie!';
+      subMessage = 'Az On rendelese keszen all az atvetelre!';
     } else if (orderData.status === 'OUT_FOR_DELIVERY') {
-      subject = `Objednávka #${orderData.orderNumber} je na ceste - Palace Cafe`;
-      statusMessage = 'Vaša objednávka je na ceste k vám!';
-      statusMessageHu = 'Az Ön rendelése úton van!';
+      subject = `Objednavka ${orderData.orderNumber} je na ceste - Palace Cafe`;
+      headerText = 'Objednavka je na ceste / Rendeles uton van';
+      mainMessage = 'Vasa objednavka je na ceste k vam!';
+      subMessage = 'Az On rendelese uton van!';
     }
     
     const msg = {
@@ -81,65 +83,49 @@ async function sendOrderStatusEmail(orderData, customerEmail) {
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <div style="background: linear-gradient(135deg, #38141A, #1D665D); color: white; text-align: center; padding: 30px; border-radius: 10px;">
-            <h1>🍽️ Palace Cafe & Street Food</h1>
-            <p>${statusMessage} / ${statusMessageHu}</p>
+            <h1>Palace Cafe & Street Food</h1>
+            <p>${headerText}</p>
           </div>
           
           <div style="padding: 30px; background: #f9f9f9; border-radius: 10px; margin-top: 20px;">
-            <h2>Dobrý deň ${orderData.customerName},</h2>
-            <p><strong>Jó napot ${orderData.customerName},</strong></p>
+            <h2>Dobry den ${orderData.customerName},</h2>
+            <p><strong>Jo napot ${orderData.customerName},</strong></p>
             
-            ${orderData.status === 'READY' ? `
-            <p>Vaša objednávka #${orderData.orderNumber} je pripravená na vyzdvihnutie v našej prevádzke!</p>
-            <p><em>Az Ön ${orderData.orderNumber} számú rendelése készen áll az átvételre az üzletünkben!</em></p>
-            
-            <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0;">
-              <p><strong>📍 Adresa vyzdvihnutia / Átvételi cím:</strong><br>
-              Hradná 168/2, 945 01 Komárno</p>
-              <p><strong>⏰ Stav:</strong> Pripravené na vyzdvihnutie / Átvételre kész</p>
+            <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; text-align: center;">
+              <p style="font-size: 18px; color: #38141A; font-weight: bold;">${mainMessage}</p>
+              <p style="font-size: 16px; color: #1D665D; font-style: italic;">${subMessage}</p>
+              
+              ${orderData.status === 'READY' ? `
+              <div style="margin-top: 20px; padding: 15px; background: #f0f8f0; border-radius: 8px;">
+                <p><strong>Adresa / Cim:</strong><br>Hradna 168/2, 945 01 Komarno</p>
+              </div>
+              ` : `
+              <div style="margin-top: 20px; padding: 15px; background: #f0f8f0; border-radius: 8px;">
+                <p>Nas kurier vas bude kontaktovat pred dorucenim.<br>
+                <em>Futarunk a kezbesites elott felveszi Onnel a kapcsolatot.</em></p>
+              </div>
+              `}
             </div>
             
-            <p>Prosím, príďte si vyzdvihnúť svoju objednávku čo najskôr.</p>
-            <p><em>Kérjük, hogy mielőbb vegye át a rendelését.</em></p>
-            ` : `
-            <p>Vaša objednávka #${orderData.orderNumber} je momentálne na ceste k vám!</p>
-            <p><em>Az Ön ${orderData.orderNumber} számú rendelése jelenleg úton van Önhöz!</em></p>
-            
-            <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0;">
-              <p><strong>🚚 Stav:</strong> Na ceste / Úton</p>
-              <p><strong>📱 Kontakt kuriéra:</strong> Kuriér vás bude kontaktovať pred doručením</p>
+            <div style="text-align: center; padding: 20px; color: #666; font-size: 14px;">
+              <p>Dakujeme za doveru! / Koszonjuk a bizalmat!</p>
             </div>
-            
-            <p>Náš kuriér vás bude kontaktovať tesne pred doručením.</p>
-            <p><em>Futárunk a kézbesítés előtt felveszi Önnel a kapcsolatot.</em></p>
-            `}
-          </div>
-          
-          <div style="text-align: center; padding: 20px; color: #666;">
-            <p>Palace Cafe & Street Food s.r.o.<br>
-            Hradná 168/2, 945 01 Komárno</p>
-            <p style="margin-top: 30px;">
-              🙏 Ďakujeme za dôveru! / Köszönjük a bizalmát!
-            </p>
           </div>
         </div>
       `,
       text: `
-Palace Cafe & Street Food - ${statusMessage}
+Palace Cafe & Street Food
 
-Dobrý deň ${orderData.customerName},
+Dobry den ${orderData.customerName},
+
+${mainMessage}
+${subMessage}
 
 ${orderData.status === 'READY' ? 
-`Vaša objednávka #${orderData.orderNumber} je pripravená na vyzdvihnutie!
+`Adresa: Hradna 168/2, 945 01 Komarno` :
+`Nas kurier vas bude kontaktovat pred dorucenim.`}
 
-Adresa: Hradná 168/2, 945 01 Komárno
-Prosím, príďte si vyzdvihnúť svoju objednávku čo najskôr.` :
-`Vaša objednávka #${orderData.orderNumber} je na ceste k vám!
-
-Náš kuriér vás bude kontaktovať tesne pred doručením.`}
-
-Ďakujeme za dôveru!
-Palace Cafe & Street Food s.r.o.
+Dakujeme za doveru!
 `,
       customArgs: {
         'order_number': orderData.orderNumber,
@@ -148,7 +134,7 @@ Palace Cafe & Street Food s.r.o.
     };
 
     const result = await sgMail.send(msg);
-    console.log(`✅ SendGrid status email sent to ${customerEmail}`);
+    console.log(`Status email sent to ${customerEmail}`);
     
     return { 
       success: true, 
@@ -156,7 +142,7 @@ Palace Cafe & Street Food s.r.o.
     };
     
   } catch (error) {
-    console.error('❌ Failed to send SendGrid status email:', error);
+    console.error('Failed to send status email:', error);
     
     if (error.response) {
       console.error('SendGrid API Error:', {
