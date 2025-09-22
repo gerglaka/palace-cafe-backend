@@ -302,22 +302,24 @@ function generateInvoicePDF(invoiceData) {
              .stroke();
         }
       });
-
-      if (invoiceData.orderType === 'DELIVERY' && invoiceData.deliveryFee && invoiceData.deliveryFee > 0) {
+          
+      if (invoiceData.orderType === 'DELIVERY') {
         if (y > 700) {
           doc.addPage();
           y = 50;
         }
         
+        const deliveryFee = 2.50; // Fixed delivery fee
+        
         doc.fontSize(9)
            .fillColor(COLORS.dark)
            .text('Poplatok za dorucenie', 55, y, { width: 240 })
            .text('1', 300, y)
-           .text(formatCurrency(invoiceData.deliveryFee), 350, y)
-           .text(formatCurrency(invoiceData.deliveryFee), 470, y);
+           .text(formatCurrency(deliveryFee), 350, y)
+           .text(formatCurrency(deliveryFee), 470, y);
         
         y += 20;
-      }      
+      }    
       
       // Table bottom
       doc.strokeColor(COLORS.secondary)
