@@ -133,7 +133,7 @@ function generateInvoicePDF(invoiceData) {
       
       doc.fontSize(10)
          .fillColor(COLORS.light)
-         .text('Daňový doklad', 400, 75, { align: 'right', encoding: 'utf8' });
+         .text('Da\u0148ov\u00FD doklad', 400, 75, { align: 'right' })
       
       // Line
       doc.strokeColor(COLORS.secondary)
