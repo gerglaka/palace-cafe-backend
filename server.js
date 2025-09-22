@@ -325,7 +325,7 @@ app.get('/api/customization', asyncHandler(async (req, res) => {
 // ============================================
 
 const { generateInvoicePDF, generateInvoiceNumber, getNextInvoiceCounter, calculateVATBreakdown } = require('./utils/invoice-generator');
-const { sendInvoiceEmail, sendOrderConfirmationEmail, testEmailConfig } = require('./utils/email-service');
+const { sendInvoiceEmail, sendOrderConfirmationEmail, testEmailConfig } = require('./utils/email-service-sendgrid');
 
 // Place new order
 app.post('/api/orders', orderLimiter, asyncHandler(async (req, res) => {

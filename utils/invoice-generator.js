@@ -192,6 +192,8 @@ function generateInvoicePDF(invoiceData) {
          .text('Dátum vystavenia:', 400, y)
          .text(formatDate(invoiceData.createdAt), 400, y + 12)
          .text('Dátum splatnosti:', 400, y + 30)
+         .text(formatDate(invoiceData.createdAt), 400, y + 42)
+         .text('Dátum dodanie:', 400, y + 30)
          .text(formatDate(invoiceData.createdAt), 400, y + 42);
       
       y += 70;
