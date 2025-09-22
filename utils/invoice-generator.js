@@ -155,8 +155,8 @@ function generateInvoicePDF(invoiceData) {
 
       // Calculate total gross amount including delivery fee if it's a delivery order
       let totalGrossAmount = invoiceData.totalGross;
-      if (invoiceData.orderType === 'DELIVERY' && invoiceData.deliveryFee && invoiceData.deliveryFee > 0) {
-        totalGrossAmount = invoiceData.totalGross + invoiceData.deliveryFee;
+      if (invoiceData.orderType === 'DELIVERY') {
+        totalGrossAmount = invoiceData.totalGross + 2.50; // Always add 2.50 for delivery
       }      
       
       // Calculate VAT
