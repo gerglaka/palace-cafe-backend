@@ -2,6 +2,7 @@
  * Palace Cafe & Street Food - Invoice Generator
  * Clean Slovak-only implementation with PDFKit
  * VAT calculation: GROSS = x, VAT = x * 0.19, NET = GROSS - VAT
+ * Updated: Delivery fee now included as line item and in VAT calculation
  */
 
 const PDFDocument = require('pdfkit');
@@ -153,8 +154,24 @@ function generateInvoicePDF(invoiceData) {
         resolve(pdfData);
       });
       
-      // Calculate VAT
-      const vatBreakdown = calculateVATBreakdown(invoiceData.totalGross);
+      // Calculate total gross amount including delivery fee if present
+      let totalGrossAmount = invoiceData.totalGross;
+      
+      // If it's a delivery order and delivery fee exists, it's already included in totalGross
+      // If not included, add it (fallback for backward compatibility)
+      if (invoiceData.orderType === 'DELIVERY' && invoiceData.deliveryFee && invoiceData.deliveryFee > 0) {
+        // Check if delivery fee is already included in totalGross
+        const itemsTotal = (invoiceData.orderItems || []).reduce((sum, item) => sum + (item.totalPrice || 0), 0);
+        if (Math.abs(totalGrossAmount - (itemsTotal + invoiceData.deliveryFee)) < 0.01) {
+          // Delivery fee already included in totalGross
+        } else {
+          // Add delivery fee to total
+          totalGrossAmount = invoiceData.totalGross + invoiceData.deliveryFee;
+        }
+      }
+      
+      // Calculate VAT on the total gross amount (including delivery fee)
+      const vatBreakdown = calculateVATBreakdown(totalGrossAmount);
       
       // Header
       doc.fontSize(22)
@@ -265,6 +282,7 @@ function generateInvoicePDF(invoiceData) {
       
       const items = invoiceData.orderItems || [];
       
+      // Add regular order items
       items.forEach((item, index) => {
         if (y > 700) {
           doc.addPage();
@@ -288,7 +306,7 @@ function generateInvoicePDF(invoiceData) {
         
         y += 20;
         
-        if (index < items.length - 1) {
+        if (index < items.length - 1 || (invoiceData.orderType === 'DELIVERY' && invoiceData.deliveryFee && invoiceData.deliveryFee > 0)) {
           doc.strokeColor('#eeeeee')
              .lineWidth(0.5)
              .moveTo(55, y - 5)
@@ -296,6 +314,23 @@ function generateInvoicePDF(invoiceData) {
              .stroke();
         }
       });
+      
+      // Add delivery fee as line item if it's a delivery order
+      if (invoiceData.orderType === 'DELIVERY' && invoiceData.deliveryFee && invoiceData.deliveryFee > 0) {
+        if (y > 700) {
+          doc.addPage();
+          y = 50;
+        }
+        
+        doc.fontSize(9)
+           .fillColor(COLORS.dark)
+           .text('Poplatok za dorucenie', 55, y, { width: 240 })
+           .text('1', 300, y)
+           .text(formatCurrency(invoiceData.deliveryFee), 350, y)
+           .text(formatCurrency(invoiceData.deliveryFee), 470, y);
+        
+        y += 20;
+      }
       
       // Table bottom
       doc.strokeColor(COLORS.secondary)
@@ -309,7 +344,7 @@ function generateInvoicePDF(invoiceData) {
       // Totals
       y = Math.max(y, 500);
       
-      doc.rect(300, y, 245, 100)
+      doc.rect(300, y, 245, 80)
          .stroke(COLORS.light);
       
       y += 15;
@@ -317,13 +352,7 @@ function generateInvoicePDF(invoiceData) {
       doc.fontSize(10)
          .fillColor(COLORS.dark)
          .text('Medzisucet', 310, y)
-         .text(formatCurrency(invoiceData.subtotal || vatBreakdown.netAmount), 480, y, { align: 'right' });
-      
-      if (invoiceData.deliveryFee && invoiceData.deliveryFee > 0) {
-        y += 15;
-        doc.text('Poplatok za dorucenie:', 310, y)
-           .text(formatCurrency(invoiceData.deliveryFee), 480, y, { align: 'right' });
-      }
+         .text(formatCurrency(vatBreakdown.grossAmount), 480, y, { align: 'right' });
       
       y += 15;
       doc.text('Základ DPH 19%:', 310, y)
@@ -345,7 +374,7 @@ function generateInvoicePDF(invoiceData) {
          .font('Helvetica-Bold')
          .fillColor(COLORS.primary)
          .text('CELKOM:', 310, y)
-         .text(formatCurrency(invoiceData.totalGross), 480, y, { align: 'right' });
+         .text(formatCurrency(vatBreakdown.grossAmount), 480, y, { align: 'right' });
       
       // Footer
       y = 650;

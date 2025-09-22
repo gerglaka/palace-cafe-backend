@@ -61,15 +61,15 @@ async function sendOrderStatusEmail(orderData, customerEmail) {
     let subject, headerText, mainMessage, subMessage;
     
     if (orderData.status === 'READY') {
-      subject = `Objednavka ${orderData.orderNumber} je pripravena - Palace Cafe`;
-      headerText = 'Objednavka pripravena na vyzdvihnutie / Rendeles keszre kesz atvevellre';
-      mainMessage = 'Vasa objednavka je pripravena na vyzdvihnutie!';
-      subMessage = 'Az On rendelese keszen all az atvetelre!';
+      subject = `Objednávka ${orderData.orderNumber} je pripravána - Palace Cafe`;
+      headerText = 'Objednávka pripravená na vyzdvihnutie / Rendelés készen áll az átvételre';
+      mainMessage = 'Vaša objednávka je pripravená na vyzdvihnutie!';
+      subMessage = 'Az Ön rendelése készen áll az átvételre!';
     } else if (orderData.status === 'OUT_FOR_DELIVERY') {
-      subject = `Objednavka ${orderData.orderNumber} je na ceste - Palace Cafe`;
-      headerText = 'Objednavka je na ceste / Rendeles uton van';
-      mainMessage = 'Vasa objednavka je na ceste k vam!';
-      subMessage = 'Az On rendelese uton van!';
+      subject = `Objednávka ${orderData.orderNumber} je na ceste - Palace Cafe`;
+      headerText = 'Objednávka je na ceste / Rendelés úton van';
+      mainMessage = 'VaŠa objednávka je na ceste k vám!';
+      subMessage = 'Az Ön rendelése úton van!';
     }
     
     const msg = {
@@ -97,18 +97,18 @@ async function sendOrderStatusEmail(orderData, customerEmail) {
               
               ${orderData.status === 'READY' ? `
               <div style="margin-top: 20px; padding: 15px; background: #f0f8f0; border-radius: 8px;">
-                <p><strong>Adresa / Cim:</strong><br>Hradna 168/2, 945 01 Komarno</p>
+                <p><strong>Adresa / Cim:</strong><br>Hradná 168/2, 945 01 Komárno</p>
               </div>
               ` : `
               <div style="margin-top: 20px; padding: 15px; background: #f0f8f0; border-radius: 8px;">
-                <p>Nas kurier vas bude kontaktovat pred dorucenim.<br>
-                <em>Futarunk a kezbesites elott felveszi Onnel a kapcsolatot.</em></p>
+                <p>Náš kurier vás bude kontaktovat pred doručenim.<br>
+                <em>Futárunk a kézbesítes előtt felveszi Önnel a kapcsolatot.</em></p>
               </div>
               `}
             </div>
             
             <div style="text-align: center; padding: 20px; color: #666; font-size: 14px;">
-              <p>Dakujeme za doveru! / Koszonjuk a bizalmat!</p>
+              <p>Ďakujeme za dôveru! / Köszönjük a bizalmat!</p>
             </div>
           </div>
         </div>
