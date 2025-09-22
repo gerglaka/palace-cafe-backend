@@ -603,22 +603,6 @@ app.post('/api/orders', orderLimiter, asyncHandler(async (req, res) => {
 
     console.log(`🎉 Order ${order.orderNumber} completed successfully`);
 
-    // Send order confirmation email (separate from invoice)
-    if (customerEmail) {
-      try {
-        await sendOrderConfirmationEmail({
-          orderNumber: order.orderNumber,
-          customerName,
-          orderType,
-          total
-        }, customerEmail);
-        console.log(`📧 Order confirmation sent to ${customerEmail}`);
-      } catch (confirmationError) {
-        console.error('❌ Order confirmation email failed:', confirmationError);
-        // Don't fail the order
-      }
-    }
-
     // Return success response
     res.status(201).json({
       success: true,
@@ -2047,6 +2031,15 @@ app.put('/api/admin/orders/:id/ready', authenticateAdmin, asyncHandler(async (re
     readyAt: updatedOrder.readyAt
   });
 
+  if (updatedOrder.orderType === 'PICKUP' && updatedOrder.customerEmail) {
+    try {
+      await sendOrderReadyEmail(updatedOrder, updatedOrder.customerEmail);
+      console.log(`📧 Order ready email sent to ${updatedOrder.customerEmail}`);
+    } catch (emailError) {
+      console.error('❌ Order ready email failed:', emailError);
+    }
+  }
+
   console.log('📡 WebSocket emitted: orderStatusUpdate for', updatedOrder.orderNumber);
 
   res.json({
@@ -2071,6 +2064,15 @@ app.put('/api/admin/orders/:id/delivery', authenticateAdmin, asyncHandler(async 
     orderNumber: updatedOrder.orderNumber, 
     status: updatedOrder.status
   });
+
+  if (updatedOrder.customerEmail) {
+    try {
+      await sendOrderOutForDeliveryEmail(updatedOrder, updatedOrder.customerEmail);
+      console.log(`📧 Order out for delivery email sent to ${updatedOrder.customerEmail}`);
+    } catch (emailError) {
+      console.error('❌ Order delivery email failed:', emailError);
+    }
+  }
 
   console.log('📡 WebSocket emitted: orderStatusUpdate for', updatedOrder.orderNumber);
 

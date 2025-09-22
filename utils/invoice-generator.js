@@ -193,8 +193,8 @@ function generateInvoicePDF(invoiceData) {
          .text(formatDate(invoiceData.createdAt), 400, y + 12)
          .text('Dátum splatnosti:', 400, y + 30)
          .text(formatDate(invoiceData.createdAt), 400, y + 42)
-         .text('Dátum dodanie:', 400, y + 30)
-         .text(formatDate(invoiceData.createdAt), 400, y + 42);
+         .text('Dátum dodanie:', 400, y + 60)
+         .text(formatDate(invoiceData.createdAt), 400, y + 72);
       
       y += 70;
       doc.text('Cislo objednavky:', 400, y)
@@ -365,10 +365,12 @@ function generateInvoicePDF(invoiceData) {
          .fillColor(COLORS.dark)
          .text(paymentMethods[invoiceData.paymentMethod] || invoiceData.paymentMethod, 150, y);
       
-      y += 15;
-      doc.font('Helvetica-Bold')
-         .fillColor(COLORS.primary)
-         .text('UHRADENÉ', 50, y);
+      if (invoiceData.paymentMethod === 'CARD') {
+        y += 15;
+        doc.font('Helvetica-Bold')
+           .fillColor(COLORS.primary)
+           .text('UHRADENÉ', 50, y);
+      }
       
       y += 30;
       doc.fontSize(8)
