@@ -81,6 +81,40 @@ async function getNextInvoiceCounter(paymentMethod, year, prisma) {
 }
 
 /**
+ * Clean Slovak/Hungarian characters for PDF compatibility
+ */
+function cleanTextForPDF(text) {
+  if (!text) return '';
+  
+  const charMap = {
+    // Slovak characters
+    'ň': 'n', 'Ň': 'N',
+    'č': 'c', 'Č': 'C', 
+    'ľ': 'l', 'Ľ': 'L',
+    'ť': 't', 'Ť': 'T',
+    'ď': 'd', 'Ď': 'D',
+    'ž': 'z', 'Ž': 'Z',
+    'š': 's', 'Š': 'S',
+    
+    // Hungarian characters  
+    'ő': 'o', 'Ő': 'O',
+    'ű': 'u', 'Ű': 'U',
+    
+    // Common accented characters
+    'á': 'a', 'Á': 'A',
+    'é': 'e', 'É': 'E', 
+    'í': 'i', 'Í': 'I',
+    'ó': 'o', 'Ó': 'O',
+    'ú': 'u', 'Ú': 'U',
+    'ý': 'y', 'Ý': 'Y'
+  };
+  
+  return text.replace(/[^\x00-\x7F]/g, function(char) {
+    return charMap[char] || char;
+  });
+}
+
+/**
  * Format currency
  */
 function formatCurrency(amount) {
@@ -194,7 +228,7 @@ function generateInvoicePDF(invoiceData) {
       doc.font('Helvetica')
          .fillColor(COLORS.dark)
          .fontSize(10)
-         .text(invoiceData.customerName || 'Zákazník', 50, y);
+         .text(cleanTextForPDF(invoiceData.customerName || 'Zákazník'), 50, y);
       
       if (invoiceData.customerPhone) {
         doc.text(`Tel: ${invoiceData.customerPhone}`, 50, y + 12);
