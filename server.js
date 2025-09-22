@@ -344,8 +344,10 @@ app.post('/api/orders', orderLimiter, asyncHandler(async (req, res) => {
 
   console.log('🛒 Processing new order...');
   console.log('- customerName:', customerName);
+  console.log('- customerPhone:', customerPhone, typeof customerPhone);
   console.log('- items:', items?.length || 0, 'items');
   console.log('- paymentMethod:', paymentMethod);
+
 
   // Validation
   if (!customerName || !customerPhone || !items || items.length === 0) {
