@@ -196,7 +196,7 @@ function generateInvoicePDF(invoiceData) {
          .text('Dátum dodanie:', 400, y + 60)
          .text(formatDate(invoiceData.createdAt), 400, y + 72);
       
-      y += 70;
+      y += 100;
       doc.text('Cislo objednavky:', 400, y)
          .font('Helvetica-Bold')
          .text(`#${invoiceData.order?.orderNumber || 'N/A'}`, 400, y + 12);
@@ -321,7 +321,7 @@ function generateInvoicePDF(invoiceData) {
       
       if (invoiceData.deliveryFee && invoiceData.deliveryFee > 0) {
         y += 15;
-        doc.text('Poplatok za doručenie:', 310, y)
+        doc.text('Poplatok za dorucenie:', 310, y)
            .text(formatCurrency(invoiceData.deliveryFee), 480, y, { align: 'right' });
       }
       

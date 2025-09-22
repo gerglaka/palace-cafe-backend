@@ -39,6 +39,137 @@ function initializeSendGrid() {
 }
 
 /**
+ * Send order status notification email via SendGrid
+ */
+async function sendOrderStatusEmail(orderData, customerEmail) {
+  try {
+    console.log(`📧 Preparing SendGrid status email for ${customerEmail}`);
+    
+    if (!customerEmail) {
+      return { success: false, error: 'No email address provided' };
+    }
+
+    // Initialize SendGrid if not already done
+    if (!isInitialized) {
+      const initialized = initializeSendGrid();
+      if (!initialized) {
+        return { success: false, error: 'SendGrid not configured' };
+      }
+    }
+
+    // Generate content based on status
+    let statusMessage, statusMessageHu, subject;
+    
+    if (orderData.status === 'READY') {
+      subject = `Objednávka #${orderData.orderNumber} je pripravená na vyzdvihnutie - Palace Cafe`;
+      statusMessage = 'Vaša objednávka je pripravená na vyzdvihnutie!';
+      statusMessageHu = 'Az Ön rendelése készen áll az átvételre!';
+    } else if (orderData.status === 'OUT_FOR_DELIVERY') {
+      subject = `Objednávka #${orderData.orderNumber} je na ceste - Palace Cafe`;
+      statusMessage = 'Vaša objednávka je na ceste k vám!';
+      statusMessageHu = 'Az Ön rendelése úton van!';
+    }
+    
+    const msg = {
+      to: customerEmail,
+      from: {
+        email: SENDGRID_CONFIG.from.email,
+        name: SENDGRID_CONFIG.from.name
+      },
+      replyTo: SENDGRID_CONFIG.replyTo,
+      subject: subject,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: linear-gradient(135deg, #38141A, #1D665D); color: white; text-align: center; padding: 30px; border-radius: 10px;">
+            <h1>🍽️ Palace Cafe & Street Food</h1>
+            <p>${statusMessage} / ${statusMessageHu}</p>
+          </div>
+          
+          <div style="padding: 30px; background: #f9f9f9; border-radius: 10px; margin-top: 20px;">
+            <h2>Dobrý deň ${orderData.customerName},</h2>
+            <p><strong>Jó napot ${orderData.customerName},</strong></p>
+            
+            ${orderData.status === 'READY' ? `
+            <p>Vaša objednávka #${orderData.orderNumber} je pripravená na vyzdvihnutie v našej prevádzke!</p>
+            <p><em>Az Ön ${orderData.orderNumber} számú rendelése készen áll az átvételre az üzletünkben!</em></p>
+            
+            <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <p><strong>📍 Adresa vyzdvihnutia / Átvételi cím:</strong><br>
+              Hradná 168/2, 945 01 Komárno</p>
+              <p><strong>⏰ Stav:</strong> Pripravené na vyzdvihnutie / Átvételre kész</p>
+            </div>
+            
+            <p>Prosím, príďte si vyzdvihnúť svoju objednávku čo najskôr.</p>
+            <p><em>Kérjük, hogy mielőbb vegye át a rendelését.</em></p>
+            ` : `
+            <p>Vaša objednávka #${orderData.orderNumber} je momentálne na ceste k vám!</p>
+            <p><em>Az Ön ${orderData.orderNumber} számú rendelése jelenleg úton van Önhöz!</em></p>
+            
+            <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <p><strong>🚚 Stav:</strong> Na ceste / Úton</p>
+              <p><strong>📱 Kontakt kuriéra:</strong> Kuriér vás bude kontaktovať pred doručením</p>
+            </div>
+            
+            <p>Náš kuriér vás bude kontaktovať tesne pred doručením.</p>
+            <p><em>Futárunk a kézbesítés előtt felveszi Önnel a kapcsolatot.</em></p>
+            `}
+          </div>
+          
+          <div style="text-align: center; padding: 20px; color: #666;">
+            <p>Palace Cafe & Street Food s.r.o.<br>
+            Hradná 168/2, 945 01 Komárno</p>
+            <p style="margin-top: 30px;">
+              🙏 Ďakujeme za dôveru! / Köszönjük a bizalmát!
+            </p>
+          </div>
+        </div>
+      `,
+      text: `
+Palace Cafe & Street Food - ${statusMessage}
+
+Dobrý deň ${orderData.customerName},
+
+${orderData.status === 'READY' ? 
+`Vaša objednávka #${orderData.orderNumber} je pripravená na vyzdvihnutie!
+
+Adresa: Hradná 168/2, 945 01 Komárno
+Prosím, príďte si vyzdvihnúť svoju objednávku čo najskôr.` :
+`Vaša objednávka #${orderData.orderNumber} je na ceste k vám!
+
+Náš kuriér vás bude kontaktovať tesne pred doručením.`}
+
+Ďakujeme za dôveru!
+Palace Cafe & Street Food s.r.o.
+`,
+      customArgs: {
+        'order_number': orderData.orderNumber,
+        'order_status': orderData.status
+      }
+    };
+
+    const result = await sgMail.send(msg);
+    console.log(`✅ SendGrid status email sent to ${customerEmail}`);
+    
+    return { 
+      success: true, 
+      messageId: result[0].headers['x-message-id'] 
+    };
+    
+  } catch (error) {
+    console.error('❌ Failed to send SendGrid status email:', error);
+    
+    if (error.response) {
+      console.error('SendGrid API Error:', {
+        statusCode: error.response.statusCode,
+        body: error.response.body
+      });
+    }
+    
+    return { success: false, error: error.message };
+  }
+}
+
+/**
  * Send invoice email with PDF attachment using SendGrid
  */
 async function sendInvoiceEmail(invoiceData, pdfBuffer, customerEmail) {
@@ -524,6 +655,7 @@ initializeSendGrid();
 module.exports = {
   sendInvoiceEmail,
   sendOrderConfirmationEmail, 
+  sendOrderStatusEmail,
   testEmailConfig,
   EMAIL_CONFIG: SENDGRID_CONFIG // For compatibility
 };

@@ -2033,7 +2033,12 @@ app.put('/api/admin/orders/:id/ready', authenticateAdmin, asyncHandler(async (re
 
   if (updatedOrder.orderType === 'PICKUP' && updatedOrder.customerEmail) {
     try {
-      await sendOrderReadyEmail(updatedOrder, updatedOrder.customerEmail);
+      await sendOrderStatusEmail({
+        orderNumber: updatedOrder.orderNumber,
+        customerName: updatedOrder.customerName,
+        orderType: updatedOrder.orderType,
+        status: 'READY'
+      }, updatedOrder.customerEmail);
       console.log(`📧 Order ready email sent to ${updatedOrder.customerEmail}`);
     } catch (emailError) {
       console.error('❌ Order ready email failed:', emailError);
@@ -2067,8 +2072,13 @@ app.put('/api/admin/orders/:id/delivery', authenticateAdmin, asyncHandler(async 
 
   if (updatedOrder.customerEmail) {
     try {
-      await sendOrderOutForDeliveryEmail(updatedOrder, updatedOrder.customerEmail);
-      console.log(`📧 Order out for delivery email sent to ${updatedOrder.customerEmail}`);
+      await sendOrderStatusEmail({
+        orderNumber: updatedOrder.orderNumber,
+        customerName: updatedOrder.customerName,
+        orderType: updatedOrder.orderType,
+        status: 'OUT_FOR_DELIVERY'
+      }, updatedOrder.customerEmail);
+      console.log(`📧 Order delivery email sent to ${updatedOrder.customerEmail}`);
     } catch (emailError) {
       console.error('❌ Order delivery email failed:', emailError);
     }
