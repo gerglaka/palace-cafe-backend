@@ -19,6 +19,10 @@ model Restaurant {
   city              String?
   postalCode        String?
   country           String   @default("Slovakia")
+  ico               String?   // Slovak ICO number
+  dic               String?   // Slovak DIC number  
+  vatNumber         String?   // IČ DPH number
+  vatRate           Float     @default(20.0) // Slovak VAT RATE
   isActive          Boolean  @default(true)
   deliveryFee       Float    @default(2.50)
   minimumOrder      Float    @default(0.00)
@@ -252,6 +256,7 @@ model Order {
   address           CustomerAddress?  @relation(fields: [addressId], references: [id])
   items             OrderItem[]
   payments          Payment[]
+  invoice           Invoice?
   
   @@map("orders")
 }
@@ -363,4 +368,43 @@ enum AdminRole {
   ADMIN
   MANAGER
   STAFF
+}
+
+// Invoice records for Slovak legal compliance
+model Invoice {
+  id              Int           @id @default(autoincrement())
+  invoiceNumber   String        @unique
+  orderId         Int           @unique
+  
+  // Customer information
+  customerName    String
+  customerEmail   String?
+  customerPhone   String?
+  
+  // Financial breakdown (Slovak VAT requirements)
+  subtotal        Float         // Total before delivery and VAT
+  deliveryFee     Float         @default(0.00)
+  totalNet        Float         // Total without VAT
+  vatAmount       Float         // 20% VAT amount
+  totalGross      Float         // Final total with VAT
+  
+  // Payment information
+  paymentMethod   PaymentMethod
+  
+  // Order items stored as JSON for PDF generation
+  orderItems      Json
+  
+  // Email tracking
+  emailSent       Boolean       @default(false)
+  emailSentAt     DateTime?
+  emailAttempts   Int           @default(0)
+  
+  // Timestamps
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  // Relations
+  order           Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  @@map("invoices")
 }

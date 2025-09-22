@@ -54,12 +54,16 @@ app.use(cors({
     'http://127.0.0.1:3000',
     'http://localhost:5500',
     'http://127.0.0.1:5500',
-    'file://' 
+    'file://', 
+    'https://js.stripe.com'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token']
 }));
+
+// Stripe webhook needs raw body, so handle it before JSON parsing
+app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }));
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -320,6 +324,9 @@ app.get('/api/customization', asyncHandler(async (req, res) => {
 // ORDER MANAGEMENT APIs
 // ============================================
 
+const { generateInvoicePDF, generateInvoiceNumber, getNextInvoiceCounter, calculateVATBreakdown } = require('./utils/invoice-generator');
+const { sendInvoiceEmail, sendOrderStatusEmail, testEmailConfig } = require('./utils/email-service-sendgrid');
+
 // Place new order
 app.post('/api/orders', orderLimiter, asyncHandler(async (req, res) => {
   const {
@@ -335,19 +342,12 @@ app.post('/api/orders', orderLimiter, asyncHandler(async (req, res) => {
     paymentMethod // 'CASH', 'CARD', 'ONLINE'
   } = req.body;
 
-  console.log('Extracted fields:');
+  console.log('🛒 Processing new order...');
   console.log('- customerName:', customerName);
-  console.log('- items:', items);
-  console.log('- deliveryNotes:', deliveryNotes);  
+  console.log('- customerPhone:', customerPhone, typeof customerPhone);
+  console.log('- items:', items?.length || 0, 'items');
+  console.log('- paymentMethod:', paymentMethod);
 
-    // Log each item's structure
-  items.forEach((item, index) => {
-    console.log(`Item ${index}:`, {
-      menuItemId: item.menuItemId,
-      removeItems: item.removeItems,
-      specialNotes: item.specialNotes
-    });
-  });
 
   // Validation
   if (!customerName || !customerPhone || !items || items.length === 0) {
@@ -364,135 +364,267 @@ app.post('/api/orders', orderLimiter, asyncHandler(async (req, res) => {
     });
   }
 
-  // Get restaurant settings for delivery fee
-  const restaurant = await prisma.restaurant.findFirst();
-  const deliveryFee = (orderType === 'DELIVERY') ? restaurant?.deliveryFee || 2.50 : 0;
+  try {
+    // Get restaurant settings for delivery fee
+    const restaurant = await prisma.restaurant.findFirst();
+    const deliveryFee = (orderType === 'DELIVERY') ? restaurant?.deliveryFee || 2.50 : 0;
 
-  // Calculate totals
-  let subtotal = 0;
-  const orderItems = [];
+    // Calculate totals and prepare order items
+    let subtotal = 0;
+    const orderItems = [];
+    const invoiceItems = []; // For invoice generation
 
-  for (const item of items) {
-    const menuItem = await prisma.menuItem.findUnique({
-      where: { id: item.menuItemId }
-    });
-
-    if (!menuItem) {
-      return res.status(400).json({
-        success: false,
-        error: `Menu item with ID ${item.menuItemId} not found`
+    for (const item of items) {
+      const menuItem = await prisma.menuItem.findUnique({
+        where: { id: item.menuItemId },
+        include: {
+          translations: { where: { language: 'hu' } }
+        }
       });
-    }
 
-    let itemTotal = menuItem.price * item.quantity;
-    
-    // Add fries upgrade cost - check if sides are included
-    if (item.friesUpgrade) {
-      const friesOption = await prisma.friesOption.findFirst({
-        where: { slug: item.friesUpgrade }
-      });
+      if (!menuItem) {
+        return res.status(400).json({
+          success: false,
+          error: `Menu item with ID ${item.menuItemId} not found`
+        });
+      }
+
+      let itemTotal = menuItem.price * item.quantity;
+      let customizations = [];
       
-      if (friesOption) {
-        if (menuItem.includesSides) {
-          // Items WITH sides included - regular fries are FREE, only charge for upgrades
-          if (friesOption.slug !== 'regular' && friesOption.slug !== 'regular-fries') {
-            itemTotal += friesOption.priceAddon * item.quantity;
-            console.log(`Added fries upgrade: ${friesOption.slug} (+€${friesOption.priceAddon})`);
+      // Add fries upgrade cost - check if sides are included
+      if (item.friesUpgrade) {
+        const friesOption = await prisma.friesOption.findFirst({
+          where: { slug: item.friesUpgrade },
+          include: { translations: { where: { language: 'hu' } } }
+        });
+        
+        if (friesOption) {
+          if (menuItem.includesSides) {
+            // Items WITH sides included - regular fries are FREE, only charge for upgrades
+            if (friesOption.slug !== 'regular' && friesOption.slug !== 'regular-fries') {
+              itemTotal += friesOption.priceAddon * item.quantity;
+              customizations.push(`${friesOption.translations[0]?.name || friesOption.slug} (+€${friesOption.priceAddon})`);
+            } else {
+              customizations.push(friesOption.translations[0]?.name || 'Regular fries');
+            }
           } else {
-            console.log(`Regular fries included for free (includesSides: true)`);
+            // Items WITHOUT sides included - charge full price for any fries
+            itemTotal += friesOption.priceAddon * item.quantity;
+            customizations.push(`${friesOption.translations[0]?.name || friesOption.slug} (+€${friesOption.priceAddon})`);
           }
-        } else {
-          // Items WITHOUT sides included - charge full price for any fries
-          itemTotal += friesOption.priceAddon * item.quantity;
-          console.log(`Added fries addon: ${friesOption.slug} (+€${friesOption.priceAddon})`);
         }
       }
-    }
 
-    // Add extras cost (assuming €0.30 per extra)
-    if (item.extras && item.extras.length > 0) {
-      itemTotal += (item.extras.length * 0.30) * item.quantity;
-    }
-
-    subtotal += itemTotal;
-    
-    orderItems.push({
-      menuItemId: item.menuItemId,
-      quantity: item.quantity,
-      unitPrice: menuItem.price,
-      totalPrice: itemTotal,
-      selectedSauce: item.selectedSauce || null,
-      friesUpgrade: item.friesUpgrade || null,
-      extras: item.extras || [],
-      removeItems: item.removeItems || [],
-      specialNotes: item.specialNotes || null
-    });
-  }
-
-  const total = subtotal + deliveryFee;
-
-  // Create order
-  const order = await prisma.order.create({
-    data: {
-      orderNumber: generateOrderNumber(),
-      status: 'PENDING',
-      orderType,
-      paymentMethod: paymentMethod || 'CASH',
-      customerName,
-      customerPhone,
-      customerEmail: customerEmail || null,
-      deliveryAddress: orderType === 'DELIVERY' ? deliveryAddress : null,
-      deliveryNotes: deliveryNotes || null,
-      specialNotes: specialNotes || null,
-      subtotal,
-      deliveryFee,
-      total,
-      scheduledFor: scheduledFor ? new Date(scheduledFor) : null,
-      estimatedTime: new Date(Date.now() + 45 * 60 * 1000), // 45 minutes from now
-      items: {
-        create: orderItems
+      // Add sauce selection
+      if (item.selectedSauce) {
+        const sauce = await prisma.sauce.findFirst({
+          where: { slug: item.selectedSauce },
+          include: { translations: { where: { language: 'hu' } } }
+        });
+        if (sauce) {
+          customizations.push(sauce.translations[0]?.name || sauce.slug);
+        }
       }
-    },
-    include: {
-      items: {
-        include: {
-          menuItem: {
-            include: {
-              translations: {
-                where: { language: 'hu' }
+
+      // Add extras cost (€0.30 per extra)
+      if (item.extras && item.extras.length > 0) {
+        const extrasCount = item.extras.length;
+        const extrasCost = extrasCount * 0.30;
+        itemTotal += extrasCost * item.quantity;
+        customizations.push(`${extrasCount} extra(s) (+€${extrasCost.toFixed(2)})`);
+      }
+
+      subtotal += itemTotal;
+      
+      // For database
+      orderItems.push({
+        menuItemId: item.menuItemId,
+        quantity: item.quantity,
+        unitPrice: menuItem.price,
+        totalPrice: itemTotal,
+        selectedSauce: item.selectedSauce || null,
+        friesUpgrade: item.friesUpgrade || null,
+        extras: item.extras || [],
+        removeItems: item.removeItems || [],
+        specialNotes: item.specialNotes || null
+      });
+
+      // For invoice
+      invoiceItems.push({
+        slug: menuItem.slug,
+        name: menuItem.translations[0]?.name || 'Unknown Item',
+        quantity: item.quantity,
+        unitPrice: menuItem.price,
+        totalPrice: itemTotal,
+        customizations: customizations.join(', ')
+      });
+    }
+
+    const total = subtotal + deliveryFee;
+
+    // Create order in database
+    const order = await prisma.order.create({
+      data: {
+        orderNumber: generateOrderNumber(),
+        status: 'PENDING',
+        orderType,
+        paymentMethod: paymentMethod || 'CASH',
+        customerName,
+        customerPhone,
+        customerEmail: customerEmail || null,
+        deliveryAddress: orderType === 'DELIVERY' ? deliveryAddress : null,
+        deliveryNotes: deliveryNotes || null,
+        specialNotes: specialNotes || null,
+        subtotal,
+        deliveryFee,
+        total,
+        scheduledFor: scheduledFor ? new Date(scheduledFor) : null,
+        estimatedTime: new Date(Date.now() + 45 * 60 * 1000), // 45 minutes from now
+        items: {
+          create: orderItems
+        }
+      },
+      include: {
+        items: {
+          include: {
+            menuItem: {
+              include: {
+                translations: {
+                  where: { language: 'hu' }
+                }
               }
             }
           }
         }
       }
+    });
+
+    console.log(`✅ Order created: ${order.orderNumber}`);
+
+    // Generate invoice
+    try {
+      console.log('📄 Generating invoice...');
+      
+      // Get next invoice number
+      const currentYear = new Date().getFullYear();
+      const invoiceCounter = await getNextInvoiceCounter(paymentMethod || 'CASH', currentYear, prisma);
+      const invoiceNumber = generateInvoiceNumber(paymentMethod || 'CASH', currentYear, invoiceCounter);
+      
+      // Calculate VAT breakdown
+      const vatBreakdown = calculateVATBreakdown(total);
+      
+      // Create invoice record
+      const invoice = await prisma.invoice.create({
+        data: {
+          invoiceNumber,
+          orderId: order.id,
+          customerName,
+          customerEmail: customerEmail || null,
+          customerPhone,
+          subtotal,
+          deliveryFee,
+          totalNet: vatBreakdown.netAmount,
+          vatAmount: vatBreakdown.vatAmount,
+          totalGross: vatBreakdown.grossAmount,
+          paymentMethod: paymentMethod || 'CASH',
+          orderItems: invoiceItems, // Store as JSON
+          emailSent: false
+        },
+        include: {
+          order: true
+        }
+      });
+
+      console.log(`📋 Invoice created: ${invoiceNumber}`);
+
+      // Generate PDF
+      const pdfBuffer = await generateInvoicePDF({
+        ...invoice,
+        orderItems: invoiceItems
+      });
+
+      console.log('📧 PDF generated, attempting to send email...');
+
+      // Send invoice email if email provided
+      if (customerEmail) {
+        try {
+          const emailResult = await sendInvoiceEmail(invoice, pdfBuffer, customerEmail);
+          
+          if (emailResult.success) {
+            // Update invoice record
+            await prisma.invoice.update({
+              where: { id: invoice.id },
+              data: {
+                emailSent: true,
+                emailSentAt: new Date(),
+                emailAttempts: 1
+              }
+            });
+            console.log(`✅ Invoice email sent to ${customerEmail}`);
+          } else {
+            console.log(`⚠️ Failed to send invoice email: ${emailResult.error}`);
+            // Don't fail the order, just log the issue
+          }
+        } catch (emailError) {
+          console.error('❌ Email sending error:', emailError);
+          // Update invoice with failed attempt
+          await prisma.invoice.update({
+            where: { id: invoice.id },
+            data: {
+              emailAttempts: 1
+            }
+          });
+        }
+      } else {
+        console.log('📧 No customer email provided, skipping invoice email');
+      }
+
+    } catch (invoiceError) {
+      console.error('❌ Invoice generation failed:', invoiceError);
+      // Don't fail the order, but log the issue
+      // The order was created successfully, invoice can be generated later
     }
-  });
 
-  io.emit('newOrder', {
-    id: order.id,
-    orderNumber: order.orderNumber,
-    status: order.status,
-    customerName: order.customerName,
-    orderType: order.orderType,
-    total: order.total,
-    createdAt: order.createdAt,
-    items: order.items.map(item => ({
-      name: item.menuItem.translations[0]?.name || 'Unknown',
-      quantity: item.quantity
-    }))
-  });
-
-  res.status(201).json({
-    success: true,
-    data: {
-      orderId: order.id,
+    // Emit WebSocket event for admin dashboard
+    io.emit('newOrder', {
+      id: order.id,
       orderNumber: order.orderNumber,
       status: order.status,
-      estimatedTime: order.estimatedTime,
-      total: order.total
-    },
-    message: 'Order placed successfully!'
-  });
+      customerName: order.customerName,
+      orderType: order.orderType,
+      total: order.total,
+      createdAt: order.createdAt,
+      items: order.items.map(item => ({
+        name: item.menuItem.translations[0]?.name || 'Unknown',
+        quantity: item.quantity
+      }))
+    });
+
+    console.log(`🎉 Order ${order.orderNumber} completed successfully`);
+
+    // Return success response
+    res.status(201).json({
+      success: true,
+      data: {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+        estimatedTime: order.estimatedTime,
+        total: order.total,
+        invoiceGenerated: true
+      },
+      message: 'Order placed successfully! Invoice will be sent to your email.'
+    });
+
+  } catch (error) {
+    console.error('❌ Order creation failed:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create order',
+      details: error.message
+    });
+  }
 }));
 
 // Get order status
@@ -672,6 +804,529 @@ io.on('connection', (socket) => {
     console.log('Admin disconnected:', socket.id);
   });
 });
+
+// ============================================
+// STRIPE PAYMENT PROCESSING APIs
+// ============================================
+
+// Initialize Stripe with secret key
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+
+// Create payment intent (Step 1: Setup payment)
+app.post('/api/stripe/create-payment-intent', orderLimiter, asyncHandler(async (req, res) => {
+  const {
+    amount,
+    currency = 'eur',
+    orderData, // Customer info and order details
+    metadata = {}
+  } = req.body;
+
+  console.log('💳 Creating Stripe payment intent...');
+  console.log('- Amount:', amount, currency.toUpperCase());
+  console.log('- Customer:', orderData?.customerName);
+
+  // Validation
+  if (!amount || amount < 0.50) { // Minimum 50 cents
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid amount. Minimum payment is €0.50'
+    });
+  }
+
+  if (!orderData?.customerName || !orderData?.customerEmail) {
+    return res.status(400).json({
+      success: false,
+      error: 'Customer name and email are required for payment processing'
+    });
+  }
+
+  try {
+    // Create or retrieve customer in Stripe
+    let customer;
+    const existingCustomers = await stripe.customers.list({
+      email: orderData.customerEmail,
+      limit: 1
+    });
+
+    if (existingCustomers.data.length > 0) {
+      customer = existingCustomers.data[0];
+      console.log('🔍 Found existing Stripe customer:', customer.id);
+    } else {
+      customer = await stripe.customers.create({
+        email: orderData.customerEmail,
+        name: orderData.customerName,
+        phone: orderData.customerPhone,
+        metadata: {
+          restaurant: 'Palace Cafe & Street Food',
+          source: 'website_order'
+        }
+      });
+      console.log('✅ Created new Stripe customer:', customer.id);
+    }
+
+    // Prepare payment intent parameters
+    const paymentIntentParams = {
+        amount: Math.round(amount * 100), // Convert euros to cents
+        currency: currency.toLowerCase(),
+        customer: customer.id,
+        capture_method: 'automatic', // Charge immediately on confirmation
+        automatic_payment_methods: {
+          enabled: true,
+          allow_redirects: 'never'
+        },
+        description: `Palace Cafe Order - ${orderData.customerName}`,
+        metadata: {
+            customer_name: orderData.customerName,
+            customer_email: orderData.customerEmail,
+            customer_phone: orderData.customerPhone || '',
+            order_type: orderData.orderType || 'PICKUP',
+            restaurant: 'Palace Cafe & Street Food',
+            ...metadata
+        },
+        receipt_email: orderData.customerEmail
+    };
+
+    // Only add shipping for delivery orders
+    if (orderData.orderType === 'DELIVERY' && orderData.deliveryAddress) {
+        paymentIntentParams.shipping = {
+            name: orderData.customerName,
+            phone: orderData.customerPhone,
+            address: {
+                line1: orderData.deliveryAddress,
+                city: 'Komárno',
+                country: 'SK'
+            }
+        };
+    }
+
+    // Create payment intent
+    const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams);
+
+    console.log('✅ Payment intent created:', paymentIntent.id);
+
+    res.json({
+      success: true,
+      data: {
+        clientSecret: paymentIntent.client_secret,
+        paymentIntentId: paymentIntent.id,
+        customerId: customer.id,
+        amount: paymentIntent.amount,
+        currency: paymentIntent.currency
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Stripe payment intent creation failed:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to create payment intent'
+    });
+  }
+}));
+
+// Confirm payment and create order (Step 2: After successful payment)
+app.post('/api/stripe/confirm-payment', orderLimiter, asyncHandler(async (req, res) => {
+  const {
+    paymentIntentId,
+    orderData // Complete order information
+  } = req.body;
+
+  console.log('🔄 Confirming Stripe payment and creating order...');
+  console.log('- Payment Intent:', paymentIntentId);
+  console.log('- Customer:', orderData?.customerName);
+
+  // Validation
+  if (!paymentIntentId || !orderData) {
+    return res.status(400).json({
+      success: false,
+      error: 'Payment Intent ID and order data are required'
+    });
+  }
+
+  try {
+    // Retrieve payment intent to verify status
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    
+    if (paymentIntent.status !== 'succeeded') {
+      return res.status(400).json({
+        success: false,
+        error: 'Payment not completed. Status: ' + paymentIntent.status
+      });
+    }
+
+    console.log('✅ Payment confirmed, creating order...');
+
+    // Extract order data
+    const {
+      customerName,
+      customerPhone,
+      customerEmail,
+      orderType,
+      deliveryAddress,
+      deliveryNotes,
+      specialNotes,
+      items,
+      scheduledFor
+    } = orderData;
+
+    // Get restaurant settings for delivery fee
+    const restaurant = await prisma.restaurant.findFirst();
+    const deliveryFee = (orderType === 'DELIVERY') ? restaurant?.deliveryFee || 2.50 : 0;
+
+    // Calculate totals and prepare order items (same logic as cash orders)
+    let subtotal = 0;
+    const orderItems = [];
+    const invoiceItems = [];
+
+    for (const item of items) {
+      const menuItem = await prisma.menuItem.findUnique({
+        where: { id: item.menuItemId },
+        include: {
+          translations: { where: { language: 'hu' } }
+        }
+      });
+
+      if (!menuItem) {
+        return res.status(400).json({
+          success: false,
+          error: `Menu item with ID ${item.menuItemId} not found`
+        });
+      }
+
+      let itemTotal = menuItem.price * item.quantity;
+      let customizations = [];
+      
+      // Add fries upgrade cost
+      if (item.friesUpgrade) {
+        const friesOption = await prisma.friesOption.findFirst({
+          where: { slug: item.friesUpgrade },
+          include: { translations: { where: { language: 'hu' } } }
+        });
+        
+        if (friesOption) {
+          if (menuItem.includesSides) {
+            if (friesOption.slug !== 'regular' && friesOption.slug !== 'regular-fries') {
+              itemTotal += friesOption.priceAddon * item.quantity;
+              customizations.push(`${friesOption.translations[0]?.name || friesOption.slug} (+€${friesOption.priceAddon})`);
+            } else {
+              customizations.push(friesOption.translations[0]?.name || 'Regular fries');
+            }
+          } else {
+            itemTotal += friesOption.priceAddon * item.quantity;
+            customizations.push(`${friesOption.translations[0]?.name || friesOption.slug} (+€${friesOption.priceAddon})`);
+          }
+        }
+      }
+
+      // Add sauce selection
+      if (item.selectedSauce) {
+        const sauce = await prisma.sauce.findFirst({
+          where: { slug: item.selectedSauce },
+          include: { translations: { where: { language: 'hu' } } }
+        });
+        if (sauce) {
+          customizations.push(sauce.translations[0]?.name || sauce.slug);
+        }
+      }
+
+      // Add extras cost
+      if (item.extras && item.extras.length > 0) {
+        const extrasCount = item.extras.length;
+        const extrasCost = extrasCount * 0.30;
+        itemTotal += extrasCost * item.quantity;
+        customizations.push(`${extrasCount} extra(s) (+€${extrasCost.toFixed(2)})`);
+      }
+
+      subtotal += itemTotal;
+      
+      // For database
+      orderItems.push({
+        menuItemId: item.menuItemId,
+        quantity: item.quantity,
+        unitPrice: menuItem.price,
+        totalPrice: itemTotal,
+        selectedSauce: item.selectedSauce || null,
+        friesUpgrade: item.friesUpgrade || null,
+        extras: item.extras || [],
+        removeItems: item.removeItems || [],
+        specialNotes: item.specialNotes || null
+      });
+
+      // For invoice
+      invoiceItems.push({
+        slug: menuItem.slug,
+        name: menuItem.translations[0]?.name || 'Unknown Item',
+        quantity: item.quantity,
+        unitPrice: menuItem.price,
+        totalPrice: itemTotal,
+        customizations: customizations.join(', ')
+      });
+    }
+
+    const total = subtotal + deliveryFee;
+
+    // Verify payment amount matches order total
+    const paidAmount = paymentIntent.amount / 100; // Convert cents to euros
+    if (Math.abs(paidAmount - total) > 0.01) { // Allow 1 cent difference for rounding
+      console.error('❌ Payment amount mismatch:', paidAmount, 'vs', total);
+      return res.status(400).json({
+        success: false,
+        error: 'Payment amount does not match order total'
+      });
+    }
+
+    // Create order in database
+    const order = await prisma.order.create({
+      data: {
+        orderNumber: generateOrderNumber(),
+        status: 'PENDING', 
+        orderType,
+        paymentMethod: 'CARD', // Use CARD for Stripe payments
+        paymentStatus: 'COMPLETED', // Payment already processed
+        customerName,
+        customerPhone,
+        customerEmail,
+        deliveryAddress: orderType === 'DELIVERY' ? deliveryAddress : null,
+        deliveryNotes: deliveryNotes || null,
+        specialNotes: specialNotes || null,
+        subtotal,
+        deliveryFee,
+        total,
+        scheduledFor: scheduledFor ? new Date(scheduledFor) : null,
+        estimatedTime: new Date(Date.now() + 30 * 60 * 1000), // 30 minutes for card orders
+        confirmedAt: new Date(), // Already confirmed by payment
+        items: {
+          create: orderItems
+        }
+      },
+      include: {
+        items: {
+          include: {
+            menuItem: {
+              include: {
+                translations: { where: { language: 'hu' } }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    // Create payment record
+    await prisma.payment.create({
+      data: {
+        orderId: order.id,
+        paymentMethod: 'CARD',
+        status: 'COMPLETED',
+        amount: total,
+        currency: 'EUR',
+        transactionId: paymentIntent.id,
+        gatewayResponse: {
+          stripe_payment_intent: paymentIntentId,
+          stripe_customer: paymentIntent.customer,
+          payment_method: paymentIntent.payment_method,
+          amount_received: paymentIntent.amount_received
+        }
+      }
+    });
+
+    console.log(`✅ Order created: ${order.orderNumber}`);
+
+    // Generate invoice in background (same as cash orders)
+    setImmediate(async () => {
+      try {
+        console.log('📄 Generating invoice for card payment...');
+        
+        const currentYear = new Date().getFullYear();
+        const invoiceCounter = await getNextInvoiceCounter('CARD', currentYear, prisma);
+        const invoiceNumber = generateInvoiceNumber('CARD', currentYear, invoiceCounter);
+        const vatBreakdown = calculateVATBreakdown(total);
+        
+        const invoice = await prisma.invoice.create({
+          data: {
+            invoiceNumber,
+            orderId: order.id,
+            customerName,
+            customerEmail,
+            customerPhone,
+            subtotal,
+            deliveryFee,
+            totalNet: vatBreakdown.netAmount,
+            vatAmount: vatBreakdown.vatAmount,
+            totalGross: vatBreakdown.grossAmount,
+            paymentMethod: 'CARD',
+            orderItems: invoiceItems,
+            emailSent: false
+          },
+          include: { order: true }
+        });
+
+        console.log(`📋 Invoice created: ${invoiceNumber}`);
+
+        // Generate and send invoice (when email is re-enabled)
+        // const pdfBuffer = await generateInvoicePDF({ ...invoice, orderItems: invoiceItems });
+        // await sendInvoiceEmail(invoice, pdfBuffer, customerEmail);
+
+      } catch (invoiceError) {
+        console.error('❌ Invoice generation failed for card payment:', invoiceError);
+      }
+    });
+
+    // Emit WebSocket event for admin dashboard
+    io.emit('newOrder', {
+      id: order.id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+      customerName: order.customerName,
+      orderType: order.orderType,
+      total: order.total,
+      paymentMethod: 'CARD',
+      createdAt: order.createdAt,
+      items: order.items.map(item => ({
+        name: item.menuItem.translations[0]?.name || 'Unknown',
+        quantity: item.quantity
+      }))
+    });
+
+    console.log(`🎉 Stripe order ${order.orderNumber} completed successfully`);
+
+    // Return success response
+    res.status(201).json({
+      success: true,
+      data: {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+        estimatedTime: order.estimatedTime,
+        total: order.total,
+        paymentIntentId: paymentIntentId,
+        invoiceGenerated: true
+      },
+      message: 'Payment successful! Order confirmed.'
+    });
+
+  } catch (error) {
+    console.error('❌ Stripe order creation failed:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process payment and create order',
+      details: error.message
+    });
+  }
+}));
+
+// Stripe webhook handler (for payment confirmations and updates)
+app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), asyncHandler(async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+
+  try {
+    // Verify webhook signature
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    console.log('📡 Stripe webhook received:', event.type);
+  } catch (err) {
+    console.error('❌ Webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Handle different event types
+  switch (event.type) {
+    case 'payment_intent.succeeded':
+      const paymentIntent = event.data.object;
+      console.log('✅ Payment succeeded:', paymentIntent.id);
+      
+      // Update order status if needed
+      try {
+        const payment = await prisma.payment.findFirst({
+          where: { transactionId: paymentIntent.id },
+          include: { order: true }
+        });
+
+        if (payment && payment.order.status === 'PENDING') {
+          const updatedOrder = await prisma.order.update({
+            where: { id: payment.orderId },
+            data: { 
+              status: 'PENDING',
+              confirmedAt: new Date()
+            }
+          });
+          
+          // Emit WebSocket event for real-time updates
+          io.emit('orderStatusUpdate', {
+            id: updatedOrder.id,
+            orderNumber: updatedOrder.orderNumber,
+            status: updatedOrder.status,
+            confirmedAt: updatedOrder.confirmedAt
+          });
+          
+          console.log(`📋 Order ${payment.order.orderNumber} confirmed via webhook`);
+        }
+      } catch (error) {
+        console.error('❌ Failed to update order from webhook:', error);
+      }
+      break;
+
+    case 'payment_intent.payment_failed':
+      const failedPayment = event.data.object;
+      console.log('❌ Payment failed:', failedPayment.id);
+      
+      // Handle failed payment
+      try {
+        const payment = await prisma.payment.findFirst({
+          where: { transactionId: failedPayment.id },
+          include: { order: true }
+        });
+
+        if (payment) {
+          await prisma.payment.update({
+            where: { id: payment.id },
+            data: { status: 'FAILED' }
+          });
+          
+          // Optionally update order status to cancelled
+          await prisma.order.update({
+            where: { id: payment.orderId },
+            data: { status: 'CANCELLED' }
+          });
+          
+          console.log(`📋 Order ${payment.order.orderNumber} cancelled due to payment failure`);
+        }
+      } catch (error) {
+        console.error('❌ Failed to update failed payment:', error);
+      }
+      break;
+
+    case 'checkout.session.completed':
+      const session = event.data.object;
+      console.log('🛒 Checkout session completed:', session.id);
+      // Handle checkout session completion if using Stripe Checkout
+      break;
+
+    case 'charge.dispute.created':
+      const dispute = event.data.object;
+      console.log('⚠️ Charge disputed:', dispute.id);
+      // Handle chargebacks/disputes
+      break;
+
+    default:
+      console.log(`Unhandled event type: ${event.type}`);
+  }
+
+  res.json({ received: true });
+}));
+
+// Get Stripe publishable key for frontend
+app.get('/api/stripe/config', asyncHandler(async (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
+      currency: 'eur',
+      country: 'SK'
+    }
+  });
+}));
+
 
 
 // ============================================
@@ -888,6 +1543,7 @@ app.get('/api/admin/orders/active', authenticateAdmin, asyncHandler(async (req, 
       orderNumber: order.orderNumber,
       status: order.status,
       orderType: order.orderType,
+      paymentMethod: order.paymentMethod,
       customerName: order.customerName,
       customerPhone: order.customerPhone,
       customerEmail: order.customerEmail,
@@ -1081,6 +1737,7 @@ app.get('/api/admin/orders/archived', authenticateAdmin, asyncHandler(async (req
       orderNumber: order.orderNumber,
       status: order.status,
       orderType: order.orderType,
+      paymentMethod: order.paymentMethod,
       customerName: order.customerName,
       customerPhone: order.customerPhone,
       customerEmail: order.customerEmail,
@@ -1374,6 +2031,20 @@ app.put('/api/admin/orders/:id/ready', authenticateAdmin, asyncHandler(async (re
     readyAt: updatedOrder.readyAt
   });
 
+  if (updatedOrder.orderType === 'PICKUP' && updatedOrder.customerEmail) {
+    try {
+      await sendOrderStatusEmail({
+        orderNumber: updatedOrder.orderNumber,
+        customerName: updatedOrder.customerName,
+        orderType: updatedOrder.orderType,
+        status: 'READY'
+      }, updatedOrder.customerEmail);
+      console.log(`📧 Order ready email sent to ${updatedOrder.customerEmail}`);
+    } catch (emailError) {
+      console.error('❌ Order ready email failed:', emailError);
+    }
+  }
+
   console.log('📡 WebSocket emitted: orderStatusUpdate for', updatedOrder.orderNumber);
 
   res.json({
@@ -1398,6 +2069,20 @@ app.put('/api/admin/orders/:id/delivery', authenticateAdmin, asyncHandler(async 
     orderNumber: updatedOrder.orderNumber, 
     status: updatedOrder.status
   });
+
+  if (updatedOrder.customerEmail) {
+    try {
+      await sendOrderStatusEmail({
+        orderNumber: updatedOrder.orderNumber,
+        customerName: updatedOrder.customerName,
+        orderType: updatedOrder.orderType,
+        status: 'OUT_FOR_DELIVERY'
+      }, updatedOrder.customerEmail);
+      console.log(`📧 Order delivery email sent to ${updatedOrder.customerEmail}`);
+    } catch (emailError) {
+      console.error('❌ Order delivery email failed:', emailError);
+    }
+  }
 
   console.log('📡 WebSocket emitted: orderStatusUpdate for', updatedOrder.orderNumber);
 
@@ -2815,6 +3500,1012 @@ app.patch('/api/admin/menu/items/:id/restore', authenticateAdmin, asyncHandler(a
     });
   }
 }));
+
+// ============================================
+// ADMIN INVOICE MANAGEMENT APIs
+// ============================================
+
+// Get invoice overview statistics
+app.get('/api/admin/invoices/overview', authenticateAdmin, asyncHandler(async (req, res) => {
+  console.log('📊 Loading invoice overview statistics...');
+  
+  try {
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    // Today's statistics
+    const todayStats = await prisma.invoice.aggregate({
+      where: {
+        createdAt: {
+          gte: startOfDay
+        }
+      },
+      _sum: {
+        totalGross: true
+      },
+      _count: true
+    });
+
+    // Monthly statistics
+    const monthlyStats = await prisma.invoice.aggregate({
+      where: {
+        createdAt: {
+          gte: startOfMonth
+        }
+      },
+      _sum: {
+        totalGross: true
+      },
+      _count: true
+    });
+
+    // Payment method breakdown for current month
+    const paymentBreakdown = await prisma.invoice.groupBy({
+      by: ['paymentMethod'],
+      where: {
+        createdAt: {
+          gte: startOfMonth
+        }
+      },
+      _count: true
+    });
+
+    const paymentStats = {};
+    paymentBreakdown.forEach(item => {
+      paymentStats[item.paymentMethod] = item._count;
+    });
+
+    const overviewData = {
+      todayInvoices: todayStats._count || 0,
+      todayRevenue: todayStats._sum.totalGross || 0,
+      monthlyInvoices: monthlyStats._count || 0,
+      monthlyRevenue: monthlyStats._sum.totalGross || 0,
+      paymentBreakdown: paymentStats
+    };
+
+    console.log('✅ Invoice overview loaded');
+
+    res.json({
+      success: true,
+      data: overviewData
+    });
+
+  } catch (error) {
+    console.error('❌ Error loading invoice overview:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to load invoice overview'
+    });
+  }
+}));
+
+// Get invoices with filtering, searching, and pagination
+app.get('/api/admin/invoices', authenticateAdmin, asyncHandler(async (req, res) => {
+  console.log('📋 Loading invoices with filters...');
+  
+  try {
+    const {
+      page = 1,
+      limit = 20,
+      search = '',
+      dateRange = 'month',
+      paymentMethod = 'all',
+      orderType = 'all',
+      startDate,
+      endDate,
+      sortBy = 'createdAt',
+      sortOrder = 'desc'
+    } = req.query;
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    // Build where clause
+    let whereClause = {};
+
+    // Date filtering
+    const now = new Date();
+    let dateFilter = {};
+
+    switch (dateRange) {
+      case 'today':
+        dateFilter = {
+          gte: new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        };
+        break;
+      case 'week':
+        const weekStart = new Date(now);
+        weekStart.setDate(now.getDate() - now.getDay());
+        weekStart.setHours(0, 0, 0, 0);
+        dateFilter = { gte: weekStart };
+        break;
+      case 'month':
+        dateFilter = {
+          gte: new Date(now.getFullYear(), now.getMonth(), 1)
+        };
+        break;
+      case 'year':
+        dateFilter = {
+          gte: new Date(now.getFullYear(), 0, 1)
+        };
+        break;
+      case 'custom':
+        if (startDate && endDate) {
+          dateFilter = {
+            gte: new Date(startDate),
+            lte: new Date(new Date(endDate).setHours(23, 59, 59, 999))
+          };
+        }
+        break;
+    }
+
+    if (Object.keys(dateFilter).length > 0) {
+      whereClause.createdAt = dateFilter;
+    }
+
+    // Payment method filtering
+    if (paymentMethod !== 'all') {
+      whereClause.paymentMethod = paymentMethod;
+    }
+
+    // Order type filtering
+    if (orderType !== 'all') {
+      whereClause.orderType = orderType;
+    }
+
+    // Search functionality
+    if (search) {
+      whereClause.OR = [
+        {
+          invoiceNumber: {
+            contains: search,
+            mode: 'insensitive'
+          }
+        },
+        {
+          customerName: {
+            contains: search,
+            mode: 'insensitive'
+          }
+        },
+        {
+          customerEmail: {
+            contains: search,
+            mode: 'insensitive'
+          }
+        }
+      ];
+    }
+
+    // Build order clause
+    const validSortFields = ['createdAt', 'invoiceNumber', 'customerName', 'totalGross'];
+    const orderBy = validSortFields.includes(sortBy) 
+      ? { [sortBy]: sortOrder === 'desc' ? 'desc' : 'asc' }
+      : { createdAt: 'desc' };
+
+    // Get total count for pagination
+    const totalCount = await prisma.invoice.count({ where: whereClause });
+
+    // Get invoices
+    const invoices = await prisma.invoice.findMany({
+      where: whereClause,
+      orderBy: orderBy,
+      skip: skip,
+      take: parseInt(limit),
+      include: {
+        order: {
+          select: {
+            id: true,
+            orderNumber: true,
+            orderType: true
+          }
+        }
+      }
+    });
+
+    console.log(`✅ Found ${invoices.length} invoices (${totalCount} total)`);
+
+    const processedInvoices = invoices.map(invoice => ({
+      id: invoice.id,
+      invoiceNumber: invoice.invoiceNumber,
+      customerName: invoice.customerName,
+      customerEmail: invoice.customerEmail,
+      customerPhone: invoice.customerPhone,
+      customerAddress: invoice.customerAddress,
+      paymentMethod: invoice.paymentMethod,
+      orderType: invoice.orderType || invoice.order?.orderType,
+      totalNet: invoice.totalNet,
+      totalVat: invoice.vatAmount,
+      totalGross: invoice.totalGross,
+      vatRate: invoice.vatRate || 27,
+      createdAt: invoice.createdAt,
+      dueDate: invoice.dueDate,
+      orderId: invoice.order?.id,
+      orderNumber: invoice.order?.orderNumber
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        invoices: processedInvoices,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: totalCount,
+          pages: Math.ceil(totalCount / parseInt(limit))
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error loading invoices:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to load invoices'
+    });
+  }
+}));
+
+// Get single invoice details
+app.get('/api/admin/invoices/:id', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  console.log(`📄 Loading invoice details for ID: ${id}`);
+  
+  try {
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: parseInt(id) },
+      include: {
+        order: {
+          include: {
+            items: {
+              include: {
+                menuItem: {
+                  include: {
+                    translations: {
+                      where: { language: 'hu' }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        error: 'Invoice not found'
+      });
+    }
+
+    // Process invoice items - try from stored orderItems first, then from order relation
+    let invoiceItems = [];
+    
+    if (invoice.orderItems && Array.isArray(invoice.orderItems)) {
+      // Use stored orderItems (JSON field)
+      invoiceItems = invoice.orderItems.map(item => ({
+        name: item.name,
+        quantity: item.quantity,
+        price: item.unitPrice,
+        totalPrice: item.totalPrice,
+        customizations: item.customizations ? [{ name: item.customizations }] : []
+      }));
+    } else if (invoice.order?.items) {
+      // Fallback to order items relation
+      invoiceItems = invoice.order.items.map(item => ({
+        name: item.menuItem.translations[0]?.name || 'Unknown Item',
+        quantity: item.quantity,
+        price: item.totalPrice / item.quantity,
+        totalPrice: item.totalPrice,
+        customizations: [
+          ...(item.selectedSauce ? [{ name: item.selectedSauce }] : []),
+          ...(item.friesUpgrade ? [{ name: item.friesUpgrade }] : []),
+          ...(item.extras || []).map(extra => ({ name: extra })),
+          ...(item.specialNotes ? [{ name: `Note: ${item.specialNotes}` }] : [])
+        ].filter(c => c.name)
+      }));
+    }
+
+    const invoiceDetails = {
+      id: invoice.id,
+      invoiceNumber: invoice.invoiceNumber,
+      customerName: invoice.customerName,
+      customerEmail: invoice.customerEmail,
+      customerPhone: invoice.customerPhone,
+      customerAddress: invoice.customerAddress,
+      paymentMethod: invoice.paymentMethod,
+      orderType: invoice.orderType || invoice.order?.orderType,
+      totalNet: invoice.totalNet,
+      totalVat: invoice.vatAmount,
+      totalGross: invoice.totalGross,
+      vatRate: invoice.vatRate || 27,
+      createdAt: invoice.createdAt,
+      dueDate: invoice.dueDate,
+      orderId: invoice.order?.id,
+      orderNumber: invoice.order?.orderNumber,
+      items: invoiceItems
+    };
+
+    console.log('✅ Invoice details loaded successfully');
+
+    res.json({
+      success: true,
+      data: invoiceDetails
+    });
+
+  } catch (error) {
+    console.error('❌ Error loading invoice details:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to load invoice details'
+    });
+  }
+}));
+
+// Download invoice PDF
+app.get('/api/admin/invoices/:id/pdf', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  console.log(`📄 Generating PDF for invoice ID: ${id}`);
+  
+  try {
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: parseInt(id) },
+      include: {
+        order: {
+          include: {
+            items: {
+              include: {
+                menuItem: {
+                  include: {
+                    translations: {
+                      where: { language: 'hu' }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        error: 'Invoice not found'
+      });
+    }
+
+    console.log(`📋 Generating PDF for invoice ${invoice.invoiceNumber}`);
+
+    // Generate PDF from stored data using your existing generator
+    const pdfBuffer = await generateInvoicePDF({
+      ...invoice,
+      orderItems: invoice.orderItems // This is stored as JSON
+    });
+
+    // Set headers for PDF download
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="faktura-${invoice.invoiceNumber}.pdf"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+
+    console.log(`✅ PDF generated and sent for ${invoice.invoiceNumber}`);
+    res.send(pdfBuffer);
+
+  } catch (error) {
+    console.error('❌ Failed to generate invoice PDF:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate PDF'
+    });
+  }
+}));
+
+// Send invoice email
+app.post('/api/admin/invoices/:id/email', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { email } = req.body; // Optional: send to different email
+  
+  console.log(`📧 Sending invoice email for ID: ${id}`);
+
+  try {
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: parseInt(id) },
+      include: { order: true }
+    });
+
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        error: 'Invoice not found'
+      });
+    }
+
+    const targetEmail = email || invoice.customerEmail;
+    
+    if (!targetEmail) {
+      return res.status(400).json({
+        success: false,
+        error: 'No email address provided'
+      });
+    }
+
+    // Generate PDF
+    const pdfBuffer = await generateInvoicePDF({
+      ...invoice,
+      orderItems: invoice.orderItems
+    });
+
+    // Send email
+    const emailResult = await sendInvoiceEmail(invoice, pdfBuffer, targetEmail);
+
+    if (emailResult.success) {
+      // Update invoice record
+      await prisma.invoice.update({
+        where: { id: invoice.id },
+        data: {
+          emailSent: true,
+          emailSentAt: new Date(),
+          emailAttempts: (invoice.emailAttempts || 0) + 1
+        }
+      });
+
+      console.log(`✅ Invoice email sent to ${targetEmail}`);
+      res.json({
+        success: true,
+        message: `Invoice email sent to ${targetEmail}`
+      });
+    } else {
+      // Update failed attempt
+      await prisma.invoice.update({
+        where: { id: invoice.id },
+        data: {
+          emailAttempts: (invoice.emailAttempts || 0) + 1
+        }
+      });
+
+      res.status(500).json({
+        success: false,
+        error: emailResult.error
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Failed to send invoice email:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to send email'
+    });
+  }
+}));
+
+// Bulk download invoices
+app.post('/api/admin/invoices/bulk-download', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { invoiceIds } = req.body;
+  
+  console.log(`📦 Bulk download requested for ${invoiceIds?.length} invoices`);
+
+  try {
+    if (!invoiceIds || !Array.isArray(invoiceIds) || invoiceIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invoice IDs are required'
+      });
+    }
+
+    const invoices = await prisma.invoice.findMany({
+      where: {
+        id: {
+          in: invoiceIds.map(id => parseInt(id))
+        }
+      }
+    });
+
+    if (invoices.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'No invoices found'
+      });
+    }
+
+    // For simplicity, return a download URL that triggers individual downloads
+    // In a production system, you'd create a ZIP file
+    console.log(`✅ Bulk download prepared for ${invoices.length} invoices`);
+    
+    res.json({
+      success: true,
+      data: {
+        downloadUrl: `/api/admin/invoices/bulk-download-zip?ids=${invoiceIds.join(',')}`,
+        invoiceCount: invoices.length
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to prepare bulk download:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to prepare bulk download'
+    });
+  }
+}));
+
+// Bulk email invoices
+app.post('/api/admin/invoices/bulk-email', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { invoiceIds } = req.body;
+  
+  console.log(`📧 Bulk email requested for ${invoiceIds?.length} invoices`);
+
+  try {
+    if (!invoiceIds || !Array.isArray(invoiceIds) || invoiceIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invoice IDs are required'
+      });
+    }
+
+    const invoices = await prisma.invoice.findMany({
+      where: {
+        id: {
+          in: invoiceIds.map(id => parseInt(id))
+        },
+        customerEmail: {
+          not: null
+        }
+      }
+    });
+
+    if (invoices.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'No invoices with email addresses found'
+      });
+    }
+
+    let successCount = 0;
+    let failCount = 0;
+
+    // Send emails sequentially to avoid overwhelming the email service
+    for (const invoice of invoices) {
+      try {
+        const pdfBuffer = await generateInvoicePDF({
+          ...invoice,
+          orderItems: invoice.orderItems
+        });
+
+        const emailResult = await sendInvoiceEmail(invoice, pdfBuffer, invoice.customerEmail);
+
+        if (emailResult.success) {
+          successCount++;
+          await prisma.invoice.update({
+            where: { id: invoice.id },
+            data: {
+              emailSent: true,
+              emailSentAt: new Date(),
+              emailAttempts: (invoice.emailAttempts || 0) + 1
+            }
+          });
+        } else {
+          failCount++;
+          await prisma.invoice.update({
+            where: { id: invoice.id },
+            data: {
+              emailAttempts: (invoice.emailAttempts || 0) + 1
+            }
+          });
+        }
+      } catch (emailError) {
+        console.error(`Failed to send email for invoice ${invoice.invoiceNumber}:`, emailError);
+        failCount++;
+      }
+    }
+
+    console.log(`✅ Bulk email completed: ${successCount} sent, ${failCount} failed`);
+
+    res.json({
+      success: true,
+      data: {
+        totalProcessed: invoices.length,
+        successCount,
+        failCount,
+        message: `${successCount} emails sent successfully${failCount > 0 ? `, ${failCount} failed` : ''}`
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to send bulk emails:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to send bulk emails'
+    });
+  }
+}));
+
+// Export monthly report
+app.get('/api/admin/invoices/export/monthly', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { month, year = new Date().getFullYear() } = req.query;
+
+  console.log(`📊 Monthly export requested - ${month}/${year}`);
+
+  try {
+    if (!month || !year) {
+      return res.status(400).json({
+        success: false,
+        error: 'Month and year are required'
+      });
+    }
+
+    // Date range
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0, 23, 59, 59);
+
+    // Get invoices for the period
+    const invoices = await prisma.invoice.findMany({
+      where: {
+        createdAt: {
+          gte: startDate,
+          lte: endDate
+        }
+      },
+      include: {
+        order: {
+          select: {
+            orderNumber: true,
+            orderType: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    // Create Excel-like data structure
+    const excelData = {
+      headers: [
+        'Invoice Number',
+        'Date',
+        'Customer Name',
+        'Order Number',
+        'Payment Method',
+        'Order Type',
+        'Net Amount',
+        'VAT Amount',
+        'Gross Amount'
+      ],
+      rows: invoices.map(invoice => [
+        invoice.invoiceNumber,
+        invoice.createdAt.toISOString().split('T')[0],
+        invoice.customerName,
+        invoice.order?.orderNumber || '',
+        invoice.paymentMethod,
+        invoice.orderType || invoice.order?.orderType || '',
+        invoice.totalNet,
+        invoice.vatAmount,
+        invoice.totalGross
+      ]),
+      summary: {
+        totalInvoices: invoices.length,
+        totalNet: invoices.reduce((sum, inv) => sum + inv.totalNet, 0),
+        totalVAT: invoices.reduce((sum, inv) => sum + inv.vatAmount, 0),
+        totalGross: invoices.reduce((sum, inv) => sum + inv.totalGross, 0),
+        paymentMethodBreakdown: invoices.reduce((acc, inv) => {
+          acc[inv.paymentMethod] = (acc[inv.paymentMethod] || 0) + inv.totalGross;
+          return acc;
+        }, {})
+      }
+    };
+
+    // In a real implementation, you'd use a library like xlsx to create an actual Excel file
+    // For now, we'll return JSON that the frontend can process
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="monthly-report-${year}-${month.toString().padStart(2, '0')}.json"`);
+
+    console.log(`✅ Monthly export generated - ${invoices.length} invoices`);
+
+    res.json({
+      success: true,
+      data: excelData
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to generate monthly export:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate monthly export'
+    });
+  }
+}));
+
+// Generate VAT report
+app.get('/api/admin/invoices/vat-report', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { month, year = new Date().getFullYear() } = req.query;
+
+  console.log(`📊 VAT report requested - ${month}/${year}`);
+
+  try {
+    if (!month || !year) {
+      return res.status(400).json({
+        success: false,
+        error: 'Month and year are required'
+      });
+    }
+
+    // Date range
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0, 23, 59, 59);
+
+    // Get VAT statistics
+    const vatStats = await prisma.invoice.aggregate({
+      where: {
+        createdAt: {
+          gte: startDate,
+          lte: endDate
+        }
+      },
+      _sum: {
+        totalNet: true,
+        vatAmount: true,
+        totalGross: true
+      },
+      _count: true
+    });
+
+    // Group by VAT rate
+    const vatByRate = await prisma.invoice.groupBy({
+      by: ['vatRate'],
+      where: {
+        createdAt: {
+          gte: startDate,
+          lte: endDate
+        }
+      },
+      _sum: {
+        totalNet: true,
+        vatAmount: true,
+        totalGross: true
+      },
+      _count: true
+    });
+
+    const vatReport = {
+      period: `${month}/${year}`,
+      summary: {
+        totalInvoices: vatStats._count,
+        totalNet: vatStats._sum.totalNet || 0,
+        totalVAT: vatStats._sum.vatAmount || 0,
+        totalGross: vatStats._sum.totalGross || 0
+      },
+      vatBreakdown: vatByRate.map(rate => ({
+        vatRate: rate.vatRate || 27,
+        invoiceCount: rate._count,
+        netAmount: rate._sum.totalNet || 0,
+        vatAmount: rate._sum.vatAmount || 0,
+        grossAmount: rate._sum.totalGross || 0
+      }))
+    };
+
+    // In a real implementation, you'd generate a PDF report
+    // For now, return JSON data
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="vat-report-${year}-${month.toString().padStart(2, '0')}.json"`);
+
+    console.log(`✅ VAT report generated`);
+
+    res.json({
+      success: true,
+      data: vatReport
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to generate VAT report:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate VAT report'
+    });
+  }
+}));
+
+// Export custom date range
+app.get('/api/admin/invoices/export/custom', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { startDate, endDate } = req.query;
+
+  console.log(`📊 Custom export requested - ${startDate} to ${endDate}`);
+
+  try {
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'Start date and end date are required'
+      });
+    }
+
+    // Date range
+    const start = new Date(startDate);
+    const end = new Date(new Date(endDate).setHours(23, 59, 59, 999));
+
+    // Get invoices for the period
+    const invoices = await prisma.invoice.findMany({
+      where: {
+        createdAt: {
+          gte: start,
+          lte: end
+        }
+      },
+      include: {
+        order: {
+          select: {
+            orderNumber: true,
+            orderType: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    // Create export data
+    const exportData = {
+      dateRange: {
+        start: startDate,
+        end: endDate
+      },
+      headers: [
+        'Invoice Number',
+        'Date',
+        'Customer Name',
+        'Order Number',
+        'Payment Method',
+        'Order Type',
+        'Net Amount',
+        'VAT Amount',
+        'Gross Amount'
+      ],
+      rows: invoices.map(invoice => [
+        invoice.invoiceNumber,
+        invoice.createdAt.toISOString().split('T')[0],
+        invoice.customerName,
+        invoice.order?.orderNumber || '',
+        invoice.paymentMethod,
+        invoice.orderType || invoice.order?.orderType || '',
+        invoice.totalNet,
+        invoice.vatAmount,
+        invoice.totalGross
+      ]),
+      summary: {
+        totalInvoices: invoices.length,
+        totalNet: invoices.reduce((sum, inv) => sum + inv.totalNet, 0),
+        totalVAT: invoices.reduce((sum, inv) => sum + inv.vatAmount, 0),
+        totalGross: invoices.reduce((sum, inv) => sum + inv.totalGross, 0)
+      }
+    };
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="custom-export-${startDate}-${endDate}.json"`);
+
+    console.log(`✅ Custom export generated - ${invoices.length} invoices`);
+
+    res.json({
+      success: true,
+      data: exportData
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to generate custom export:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate custom export'
+    });
+  }
+}));
+
+// ============================================
+// EMAIL SERVICE TEST APIs
+// ============================================
+
+// Test email configuration
+app.get('/api/admin/email/test-config', authenticateAdmin, asyncHandler(async (req, res) => {
+  console.log('🧪 Testing email configuration...');
+  
+  try {
+    const testResult = await testEmailConfig();
+    
+    if (testResult.success) {
+      console.log('✅ Email configuration test passed');
+      res.json({
+        success: true,
+        message: 'Email configuration is valid',
+        config: testResult.config
+      });
+    } else {
+      console.log('❌ Email configuration test failed:', testResult.error);
+      res.status(500).json({
+        success: false,
+        error: testResult.error
+      });
+    }
+  } catch (error) {
+    console.error('❌ Email test error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Email configuration test failed'
+    });
+  }
+}));
+
+// Send test email
+app.post('/api/admin/email/send-test', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      error: 'Email address is required'
+    });
+  }
+
+  console.log(`🧪 Sending test email to ${email}`);
+
+  try {
+    // Create a sample invoice for testing
+    const testInvoiceData = {
+      invoiceNumber: 'TEST-001',
+      customerName: 'Test Customer',
+      customerEmail: email,
+      totalGross: 15.50,
+      paymentMethod: 'CASH',
+      orderItems: [
+        {
+          name: 'Palace Burger',
+          quantity: 1,
+          unitPrice: 8.50,
+          totalPrice: 8.50,
+          customizations: 'Extra cheese'
+        },
+        {
+          name: 'Fanta',
+          quantity: 1,
+          unitPrice: 2.50,
+          totalPrice: 2.50,
+          customizations: ''
+        }
+      ],
+      order: {
+        orderNumber: 'TEST-001',
+        orderType: 'PICKUP'
+      },
+      createdAt: new Date()
+    };
+
+    // Generate test PDF
+    const pdfBuffer = await generateInvoicePDF(testInvoiceData);
+    
+    // Send test email
+    const emailResult = await sendInvoiceEmail(testInvoiceData, pdfBuffer, email);
+
+    if (emailResult.success) {
+      console.log(`✅ Test email sent successfully to ${email}`);
+      res.json({
+        success: true,
+        message: `Test email sent successfully to ${email}`,
+        messageId: emailResult.messageId
+      });
+    } else {
+      console.log(`❌ Test email failed: ${emailResult.error}`);
+      res.status(500).json({
+        success: false,
+        error: emailResult.error
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Test email error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to send test email'
+    });
+  }
+}));
+
+
 
 
 // ============================================
