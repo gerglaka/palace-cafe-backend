@@ -373,8 +373,8 @@ function generateInvoicePDF(invoiceData) {
       y += 30;
       doc.fontSize(8)
          .fillColor(COLORS.light)
-         .text('Dakujeme za vasu navstevu!', 50, y)
-         .text('Palace Cafe & Street Food - Autentické chute od 2016', 50, y + 12);
+         .text('Dakujeme za vasu objednavku!', 50, y)
+         .text('Palace Cafe & Street Food - Autentické chute od 2021', 50, y + 12);
       
       doc.end();
       
