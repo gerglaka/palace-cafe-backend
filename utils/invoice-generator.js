@@ -160,7 +160,7 @@ function generateInvoicePDF(invoiceData) {
       }      
       
       // Calculate VAT
-      const vatBreakdown = calculateVATBreakdown(invoiceData.totalGross);
+      const vatBreakdown = calculateVATBreakdown(totalGrossAmount);
       
       // Header
       doc.fontSize(22)
@@ -294,7 +294,7 @@ function generateInvoicePDF(invoiceData) {
         
         y += 20;
         
-        if (index < items.length - 1) {
+        if (index < items.length - 1 || invoiceData.orderType === 'DELIVERY') {
           doc.strokeColor('#eeeeee')
              .lineWidth(0.5)
              .moveTo(55, y - 5)
@@ -308,16 +308,16 @@ function generateInvoicePDF(invoiceData) {
           doc.addPage();
           y = 50;
         }
-        
+
         const deliveryFee = 2.50; // Fixed delivery fee
-        
+
         doc.fontSize(9)
            .fillColor(COLORS.dark)
            .text('Poplatok za dorucenie', 55, y, { width: 240 })
            .text('1', 300, y)
            .text(formatCurrency(deliveryFee), 350, y)
            .text(formatCurrency(deliveryFee), 470, y);
-        
+
         y += 20;
       }    
       
