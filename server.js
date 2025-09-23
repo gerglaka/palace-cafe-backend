@@ -2990,11 +2990,34 @@ app.patch('/api/admin/menu/items/:id/availability', authenticateAdmin, asyncHand
     where: { id: parseInt(id) },
     data: { isAvailable },
     include: {
+      category: true,
       translations: {
         where: { language: 'hu' }
       }
     }
   });
+
+  // SYNC AVAILABILITY WITH CUSTOMIZATION TABLES
+  if (updatedItem.category.slug === 'sides') {
+    console.log('🔄 Syncing availability to fries_options...');
+    
+    await prisma.friesOption.updateMany({
+      where: { slug: updatedItem.slug },
+      data: { isActive: isAvailable }
+    });
+    
+    console.log('✅ Synced fries_options availability');
+    
+  } else if (updatedItem.category.slug === 'sauces') {
+    console.log('🔄 Syncing availability to sauces...');
+    
+    await prisma.sauce.updateMany({
+      where: { slug: updatedItem.slug },
+      data: { isActive: isAvailable }
+    });
+    
+    console.log('✅ Synced sauces availability');
+  }
 
   res.json({
     success: true,
@@ -3106,6 +3129,7 @@ app.post('/api/admin/menu/items', authenticateAdmin, upload.single('image'), asy
   const {
     slug,
     price,
+    priceaddon,
     categoryId,
     badge,
     spicyLevel = 0,
@@ -3178,25 +3202,22 @@ app.post('/api/admin/menu/items', authenticateAdmin, upload.single('image'), asy
         imageUrl,
         badge: badge || null,
         includesSides: includesSides === 'true' || includesSides === true,
-        isAvailable: true, // New items are available by default
+        isAvailable: true, 
         isPopular: isPopular === 'true' || isPopular === true,
         spicyLevel: parseInt(spicyLevel) || 0,
         allergens: allergens ? allergens.split(',').map(a => a.trim()).filter(a => a) : [],
         translations: {
           create: [
-            // Hungarian (required)
             {
               language: 'hu',
               name: nameHu.trim(),
               description: descriptionHu?.trim() || null
             },
-            // English (optional)
             ...(nameEn ? [{
               language: 'en',
               name: nameEn.trim(),
               description: descriptionEn?.trim() || null
             }] : []),
-            // Slovak (optional)
             ...(nameSk ? [{
               language: 'sk',
               name: nameSk.trim(),
@@ -3217,6 +3238,70 @@ app.post('/api/admin/menu/items', authenticateAdmin, upload.single('image'), asy
       }
     });
 
+    // SYNC LOGIC FOR CUSTOMIZATION TABLES
+    if (category.slug === 'sides') {
+      console.log('🔄 Syncing sides item to fries_options...');
+
+      // Create in fries_options table
+      const friesOption = await prisma.friesOption.create({
+        data: {
+          slug: slug,
+          priceAddon: parseFloat(priceAddon) || 0,
+          isDefault: false,
+          isActive: newItem.isAvailable,
+          translations: {
+            create: [
+              {
+                language: 'hu',
+                name: nameHu.trim()
+              },
+              ...(nameEn ? [{
+                language: 'en',
+                name: nameEn.trim()
+              }] : []),
+              ...(nameSk ? [{
+                language: 'sk',
+                name: nameSk.trim()
+              }] : [])
+            ]
+          }
+        }
+      });
+
+      console.log('✅ Synced to fries_options:', friesOption.id);
+
+    } else if (category.slug === 'sauces') {
+      console.log('🔄 Syncing sauces item to sauces table...');
+
+      // Create in sauces table
+      const sauce = await prisma.sauce.create({
+        data: {
+          slug: slug,
+          price: 0.00, // Sauces don't have price addon
+          isDefault: false,
+          isActive: newItem.isAvailable,
+          translations: {
+            create: [
+              {
+                language: 'hu',
+                name: nameHu.trim()
+              },
+              ...(nameEn ? [{
+                language: 'en',
+                name: nameEn.trim()
+              }] : []),
+              ...(nameSk ? [{
+                language: 'sk',
+                name: nameSk.trim()
+              }] : [])
+            ]
+          }
+        }
+      });
+
+      console.log('✅ Synced to sauces:', sauce.id);
+    }
+
     res.status(201).json({
       success: true,
       data: {
@@ -3230,9 +3315,8 @@ app.post('/api/admin/menu/items', authenticateAdmin, upload.single('image'), asy
     });
 
   } catch (error) {
-
     console.error('Create menu item error:', error);
-    
+
     if (error.code === 'P2002') {
       return res.status(400).json({
         success: false,
@@ -3253,6 +3337,7 @@ app.put('/api/admin/menu/items/:id', authenticateAdmin, upload.single('image'), 
   const {
     slug,
     price,
+    priceAddon,
     categoryId,
     badge,
     spicyLevel = 0,
@@ -3328,6 +3413,11 @@ app.put('/api/admin/menu/items/:id', authenticateAdmin, upload.single('image'), 
   }
 
   try {
+    // Get category info for sync logic
+    const category = await prisma.category.findUnique({
+      where: { id: parseInt(categoryId) }
+    });
+
     // Update menu item
     const updatedItem = await prisma.menuItem.update({
       where: { id: parseInt(id) },
@@ -3359,7 +3449,6 @@ app.put('/api/admin/menu/items/:id', authenticateAdmin, upload.single('image'), 
       ...(nameSk ? [{ language: 'sk', name: nameSk.trim(), description: descriptionSk?.trim() || null }] : [])
     ];
 
-    // Delete existing translations and create new ones
     await prisma.menuItemTranslation.deleteMany({
       where: { menuItemId: parseInt(id) }
     });
@@ -3372,6 +3461,105 @@ app.put('/api/admin/menu/items/:id', authenticateAdmin, upload.single('image'), 
         description: t.description
       }))
     });
+
+    // SYNC LOGIC FOR CUSTOMIZATION TABLES
+    if (category.slug === 'sides') {
+      console.log('🔄 Syncing sides item update to fries_options...');
+
+      // Update or create in fries_options
+      const existingFriesOption = await prisma.friesOption.findUnique({
+        where: { slug: slug }
+      });
+
+      if (existingFriesOption) {
+        // Update existing
+        await prisma.friesOption.update({
+          where: { slug: slug },
+          data: {
+            priceAddon: parseFloat(priceAddon) || 0,
+            isActive: updatedItem.isAvailable
+          }
+        });
+
+        // Update translations
+        await prisma.friesOptionTranslation.deleteMany({
+          where: { friesOptionId: existingFriesOption.id }
+        });
+
+        await prisma.friesOptionTranslation.createMany({
+          data: translationUpdates.map(t => ({
+            friesOptionId: existingFriesOption.id,
+            language: t.language,
+            name: t.name
+          }))
+        });
+      } else {
+        // Create new
+        await prisma.friesOption.create({
+          data: {
+            slug: slug,
+            priceAddon: parseFloat(priceAddon) || 0,
+            isActive: updatedItem.isAvailable,
+            translations: {
+              create: translationUpdates.map(t => ({
+                language: t.language,
+                name: t.name
+              }))
+            }
+          }
+        });
+      }
+
+      console.log('✅ Synced to fries_options');
+
+    } else if (category.slug === 'sauces') {
+      console.log('🔄 Syncing sauces item update to sauces table...');
+
+      // Update or create in sauces
+      const existingSauce = await prisma.sauce.findUnique({
+        where: { slug: slug }
+      });
+
+      if (existingSauce) {
+        // Update existing
+        await prisma.sauce.update({
+          where: { slug: slug },
+          data: {
+            isActive: updatedItem.isAvailable
+          }
+        });
+
+        // Update translations
+        await prisma.sauceTranslation.deleteMany({
+          where: { sauceId: existingSauce.id }
+        });
+
+        await prisma.sauceTranslation.createMany({
+          data: translationUpdates.map(t => ({
+            sauceId: existingSauce.id,
+            language: t.language,
+            name: t.name
+          }))
+        });
+      } else {
+        // Create new
+        await prisma.sauce.create({
+          data: {
+            slug: slug,
+            price: 0.00,
+            isActive: updatedItem.isAvailable,
+            translations: {
+              create: translationUpdates.map(t => ({
+                language: t.language,
+                name: t.name
+              }))
+            }
+          }
+        });
+      }
+
+      console.log('✅ Synced to sauces');
+    }
 
     res.json({
       success: true,
@@ -3387,7 +3575,7 @@ app.put('/api/admin/menu/items/:id', authenticateAdmin, upload.single('image'), 
 
   } catch (error) {
     console.error('Update menu item error:', error);
-    
+
     res.status(500).json({
       success: false,
       error: 'Failed to update menu item'
