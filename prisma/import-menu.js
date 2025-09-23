@@ -277,11 +277,83 @@ async function main() {
   console.log('🔐 Admin login: admin@palacecafe.sk / admin123');
 }
 
-main()
-  .catch((e) => {
-    console.error('❌ Error seeding database:', e);
-    process.exit(1);
-  })
-  .finally(async () => {
+async function shouldSeed() {
+  try {
+    const [categoryCount, menuItemCount, adminCount] = await Promise.all([
+      prisma.category.count(),
+      prisma.menuItem.count(), 
+      prisma.adminUser.count()
+    ]);
+
+    const isEmpty = categoryCount === 0 && menuItemCount === 0 && adminCount === 0;
+    
+    if (!isEmpty) {
+      console.log(`📊 Database has data: ${categoryCount} categories, ${menuItemCount} menu items, ${adminCount} admins`);
+      console.log('⏭️  Skipping seeding - database already initialized');
+      return false;
+    }
+    
+    console.log('🌱 Database is empty - proceeding with seeding');
+    return true;
+  } catch (error) {
+    console.error('❌ Error checking database state:', error.message);
+    return false;
+  }
+}
+
+async function checkEnvironment() {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isRailway = process.env.RAILWAY_ENVIRONMENT_NAME !== undefined;
+  const forceReset = process.env.FORCE_SEED === 'true';
+  
+  // Railway production: only allow seeding empty databases
+  if (isProduction && isRailway && !forceReset) {
+    console.log('🔒 Railway production mode - only seeding empty database');
+    return true; // Allow checking if database is empty
+  }
+  
+  // Local development: always allow
+  if (!isProduction && !isRailway) {
+    console.log('🛠️ Local development mode - seeding allowed');
+    return true;
+  }
+  
+  return forceReset;
+}
+
+// Smart initialization
+async function initializeDatabase() {
+  try {
+    // Check environment first
+    if (!(await checkEnvironment())) {
+      return;
+    }
+    
+    // Check if seeding is needed
+    if (!(await shouldSeed())) {
+      return;
+    }
+    
+    // Run the seeding
+    console.log('🚀 Starting database seeding...');
+    await main();
+    
+  } catch (error) {
+    console.error('❌ Database initialization failed:', error.message);
+    
+    // Don't exit process in production
+    if (process.env.NODE_ENV !== 'production') {
+      process.exit(1);
+    }
+  } finally {
     await prisma.$disconnect();
-  });
+  }
+}
+
+// Only run if called directly (not imported)
+if (require.main === module) {
+  initializeDatabase();
+}
+
+// Export for manual use
+module.exports = { main, shouldSeed, initializeDatabase };

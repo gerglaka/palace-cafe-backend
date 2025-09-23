@@ -4529,15 +4529,21 @@ app.use(errorHandler);
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, shutting down gracefully...');
-  await prisma.$disconnect();
-  process.exit(0);
+  console.log('🛑 SIGTERM received, shutting down gracefully');
+  server.close(async () => {
+    await prisma.$disconnect();
+    console.log('✅ Server closed');
+    process.exit(0);
+  });
 });
 
 process.on('SIGINT', async () => {
-  console.log('SIGINT received, shutting down gracefully...');
-  await prisma.$disconnect();
-  process.exit(0);
+  console.log('🛑 SIGINT received, shutting down gracefully');
+  server.close(async () => {
+    await prisma.$disconnect();
+    console.log('✅ Server closed');
+    process.exit(0);
+  });
 });
 
 // Start server
@@ -4552,10 +4558,19 @@ process.on('SIGINT', async () => {
 
 module.exports = app;
 
-httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
+const server = httpServer.listen(PORT, '0.0.0.0', async () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🌐 Railway Environment: ${process.env.RAILWAY_ENVIRONMENT_NAME || 'local'}`);
+  
+  // Initialize database asynchronously (doesn't block server)
+  try {
+    const { initializeDatabase } = require('./prisma/import-menu');
+    await initializeDatabase();
+  } catch (error) {
+    console.warn('⚠️ Database initialization skipped:', error.message);
+    // Server continues running even if seeding fails
+  }
 });
-
 
 
 

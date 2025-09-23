@@ -11,6 +11,7 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
+    "db:reset": "FORCE_SEED=TRUE node prisma/import-menu.js",
     "db:seed": "node prisma/seed.js"
   },
   "author": "",
