@@ -294,7 +294,7 @@ function generateInvoicePDF(invoiceData) {
       
       doc.fontSize(10)
          .fillColor(COLORS.light)
-         .text('Daňový doklad', 400, 75, { align: 'right' })
+         .text('Danovy doklad', 400, 75, { align: 'right' })
       
       // Line
       doc.strokeColor(COLORS.secondary)
@@ -307,7 +307,7 @@ function generateInvoicePDF(invoiceData) {
       let y = 120;
       doc.fontSize(11)
          .fillColor(COLORS.dark)
-         .text('Faktúra č.:', 400, y)
+         .text('Faktura c.:', 400, y)
          .font('Helvetica-Bold')
          .fillColor(COLORS.primary)
          .text(invoiceData.invoiceNumber, 400, y + 15);
@@ -324,7 +324,7 @@ function generateInvoicePDF(invoiceData) {
          .text(formatDate(invoiceData.createdAt), 400, y + 72);
       
       y += 100;
-      doc.text('Číslo objednávky:', 400, y)
+      doc.text('Císlo objednavky:', 400, y)
          .font('Helvetica-Bold')
          .text(`#${invoiceData.order?.orderNumber || 'N/A'}`, 400, y + 12);
       
@@ -333,7 +333,7 @@ function generateInvoicePDF(invoiceData) {
       doc.font('Helvetica-Bold')
          .fillColor(COLORS.secondary)
          .fontSize(11)
-         .text('Dodávateľ', 50, y);
+         .text('Dodavatel', 50, y);
       
       y += 20;
       doc.font('Helvetica')
@@ -342,16 +342,16 @@ function generateInvoicePDF(invoiceData) {
          .text(COMPANY_INFO.name, 50, y)
          .text(COMPANY_INFO.address, 50, y + 12)
          .text(COMPANY_INFO.city, 50, y + 24)
-         .text(`IČO: ${COMPANY_INFO.ico}`, 50, y + 40)
-         .text(`DIČ: ${COMPANY_INFO.dic}`, 50, y + 52)
-         .text(`IČ DPH: ${COMPANY_INFO.vatNumber}`, 50, y + 64);
+         .text(`ICO: ${COMPANY_INFO.ico}`, 50, y + 40)
+         .text(`DIC: ${COMPANY_INFO.dic}`, 50, y + 52)
+         .text(`IC DPH: ${COMPANY_INFO.vatNumber}`, 50, y + 64);
       
       // Customer info (using cleaned data)
       y = 220;
       doc.font('Helvetica-Bold')
          .fillColor(COLORS.secondary)
          .fontSize(11)
-         .text('Odberateľ', 50, y);
+         .text('Odberatel', 50, y);
       
       y += 20;
       doc.font('Helvetica')
@@ -445,7 +445,7 @@ function generateInvoicePDF(invoiceData) {
       
       doc.fontSize(10)
          .fillColor(COLORS.dark)
-         .text('Medzisúčet', 310, y)
+         .text('Medzisucet', 310, y)
          .text(formatCurrency(vatBreakdown.grossAmount), 480, y, { align: 'right' });
       
       y += 15;
@@ -498,7 +498,7 @@ function generateInvoicePDF(invoiceData) {
       y += 30;
       doc.fontSize(8)
          .fillColor(COLORS.light)
-         .text('Ďakujeme za vašu objednávku!', 50, y)
+         .text('Dakujeme za vasu objednavku!', 50, y)
          .text('Palace Cafe & Street Food - Autentické chute od 2021', 50, y + 12);
       
       doc.end();
