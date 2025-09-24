@@ -1412,6 +1412,27 @@ const loginLimiter = rateLimit({
   }
 });
 
+const requireRole = (allowedRoles) => {
+  return asyncHandler(async (req, res, next) => {
+    if (!req.adminUser) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required'
+      });
+    }
+
+    if (!allowedRoles.includes(req.adminUser.role)) {
+      console.log(`Access denied for role ${req.adminUser.role}, required: ${allowedRoles}`);
+      return res.status(403).json({
+        success: false,
+        error: 'Insufficient permissions'
+      });
+    }
+
+    next();
+  });
+};
+
 // Admin login with input validation, bcrypt, and JWT
 app.post('/api/admin/login', loginLimiter, [
   body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
@@ -1523,6 +1544,186 @@ app.get('/api/admin/auth/user', authenticateAdmin, asyncHandler(async (req, res)
     res.status(500).json({
       success: false,
       error: 'Failed to fetch user information'
+    });
+  }
+}));
+
+// Get all admin users (SUPER_ADMIN only)
+app.get('/api/admin/users', authenticateAdmin, requireRole(['SUPER_ADMIN']), asyncHandler(async (req, res) => {
+  console.log('📋 Loading admin users...');
+  
+  try {
+    const users = await prisma.adminUser.findMany({
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        isActive: true,
+        lastLoginAt: true,
+        createdAt: true
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json({
+      success: true,
+      data: users
+    });
+
+  } catch (error) {
+    console.error('Error fetching admin users:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch users'
+    });
+  }
+}));
+
+// Create new admin user (SUPER_ADMIN only)
+app.post('/api/admin/users', authenticateAdmin, requireRole(['SUPER_ADMIN']), asyncHandler(async (req, res) => {
+  const { email, firstName, lastName, role, password } = req.body;
+
+  console.log('Creating new admin user:', { email, firstName, lastName, role });
+
+  // Validation
+  if (!email || !firstName || !lastName || !role || !password) {
+    return res.status(400).json({
+      success: false,
+      error: 'All fields are required'
+    });
+  }
+
+  // Validate role
+  const validRoles = ['SUPER_ADMIN', 'RESTAURANT_USER', 'DELIVERY_USER'];
+  if (!validRoles.includes(role)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid role'
+    });
+  }
+
+  try {
+    // Check if email already exists
+    const existingUser = await prisma.adminUser.findUnique({
+      where: { email }
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email already exists'
+      });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    // Create user
+    const newUser = await prisma.adminUser.create({
+      data: {
+        email,
+        firstName,
+        lastName,
+        role,
+        password: hashedPassword
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        isActive: true,
+        createdAt: true
+      }
+    });
+
+    console.log('User created successfully:', newUser.email);
+
+    res.status(201).json({
+      success: true,
+      data: newUser,
+      message: 'User created successfully'
+    });
+
+  } catch (error) {
+    console.error('Error creating admin user:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create user'
+    });
+  }
+}));
+
+// Update admin user (SUPER_ADMIN only)
+app.put('/api/admin/users/:id', authenticateAdmin, requireRole(['SUPER_ADMIN']), asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { firstName, lastName, role, isActive } = req.body;
+
+  try {
+    const updatedUser = await prisma.adminUser.update({
+      where: { id: parseInt(id) },
+      data: {
+        firstName,
+        lastName,
+        role,
+        isActive
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        isActive: true,
+        createdAt: true
+      }
+    });
+
+    res.json({
+      success: true,
+      data: updatedUser,
+      message: 'User updated successfully'
+    });
+
+  } catch (error) {
+    console.error('Error updating user:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update user'
+    });
+  }
+}));
+
+// Delete admin user (SUPER_ADMIN only)
+app.delete('/api/admin/users/:id', authenticateAdmin, requireRole(['SUPER_ADMIN']), asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Don't allow deleting yourself
+    if (parseInt(id) === req.adminUser.id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot delete your own account'
+      });
+    }
+
+    await prisma.adminUser.delete({
+      where: { id: parseInt(id) }
+    });
+
+    res.json({
+      success: true,
+      message: 'User deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete user'
     });
   }
 }));
@@ -3720,7 +3921,7 @@ app.patch('/api/admin/menu/items/:id/restore', authenticateAdmin, asyncHandler(a
 // ============================================
 
 // Get invoice overview statistics
-app.get('/api/admin/invoices/overview', authenticateAdmin, asyncHandler(async (req, res) => {
+app.get('/api/admin/invoices/overview', authenticateAdmin, requireRole(['SUPER_ADMIN']), asyncHandler(async (req, res) => {
   console.log('📊 Loading invoice overview statistics...');
   
   try {
@@ -3961,7 +4162,7 @@ app.get('/api/admin/invoices', authenticateAdmin, asyncHandler(async (req, res) 
 }));
 
 // Get single invoice details
-app.get('/api/admin/invoices/:id', authenticateAdmin, asyncHandler(async (req, res) => {
+app.get('/api/admin/invoices/:id', authenticateAdmin, requireRole(['SUPER_ADMIN']), asyncHandler(async (req, res) => {
   const { id } = req.params;
   console.log(`📄 Loading invoice details for ID: ${id}`);
   
@@ -4059,7 +4260,7 @@ app.get('/api/admin/invoices/:id', authenticateAdmin, asyncHandler(async (req, r
 }));
 
 // Download invoice PDF
-app.get('/api/admin/invoices/:id/pdf', authenticateAdmin, asyncHandler(async (req, res) => {
+app.get('/api/admin/invoices/:id/pdf', authenticateAdmin, requireRole(['SUPER_ADMIN']), asyncHandler(async (req, res) => {
   const { id } = req.params;
   console.log(`📄 Generating PDF for invoice ID: ${id}`);
   
@@ -4118,7 +4319,7 @@ app.get('/api/admin/invoices/:id/pdf', authenticateAdmin, asyncHandler(async (re
 }));
 
 // Send invoice email
-app.post('/api/admin/invoices/:id/email', authenticateAdmin, asyncHandler(async (req, res) => {
+app.post('/api/admin/invoices/:id/email', authenticateAdmin, requireRole(['SUPER_ADMIN']), asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { email } = req.body; // Optional: send to different email
   
@@ -4196,7 +4397,7 @@ app.post('/api/admin/invoices/:id/email', authenticateAdmin, asyncHandler(async 
 }));
 
 // Bulk download invoices
-app.post('/api/admin/invoices/bulk-download', authenticateAdmin, asyncHandler(async (req, res) => {
+app.post('/api/admin/invoices/bulk-download', authenticateAdmin, requireRole(['SUPER_ADMIN']), asyncHandler(async (req, res) => {
   const { invoiceIds } = req.body;
   
   console.log(`📦 Bulk download requested for ${invoiceIds?.length} invoices`);
@@ -4246,7 +4447,7 @@ app.post('/api/admin/invoices/bulk-download', authenticateAdmin, asyncHandler(as
 }));
 
 // Bulk email invoices
-app.post('/api/admin/invoices/bulk-email', authenticateAdmin, asyncHandler(async (req, res) => {
+app.post('/api/admin/invoices/bulk-email', authenticateAdmin, requireRole(['SUPER_ADMIN']), asyncHandler(async (req, res) => {
   const { invoiceIds } = req.body;
   
   console.log(`📧 Bulk email requested for ${invoiceIds?.length} invoices`);
@@ -4337,7 +4538,7 @@ app.post('/api/admin/invoices/bulk-email', authenticateAdmin, asyncHandler(async
 }));
 
 // Export monthly report
-app.get('/api/admin/invoices/export/monthly', authenticateAdmin, asyncHandler(async (req, res) => {
+app.get('/api/admin/invoices/export/monthly', authenticateAdmin, requireRole(['SUPER_ADMIN']), asyncHandler(async (req, res) => {
   const { month, year = new Date().getFullYear() } = req.query;
 
   console.log(`📊 Monthly export requested - ${month}/${year}`);
@@ -4431,7 +4632,7 @@ app.get('/api/admin/invoices/export/monthly', authenticateAdmin, asyncHandler(as
 }));
 
 // Generate VAT report
-app.get('/api/admin/invoices/vat-report', authenticateAdmin, asyncHandler(async (req, res) => {
+app.get('/api/admin/invoices/vat-report', authenticateAdmin, requireRole(['SUPER_ADMIN']), asyncHandler(async (req, res) => {
   const { month, year = new Date().getFullYear() } = req.query;
 
   console.log(`📊 VAT report requested - ${month}/${year}`);
@@ -4520,7 +4721,7 @@ app.get('/api/admin/invoices/vat-report', authenticateAdmin, asyncHandler(async 
 }));
 
 // Export custom date range
-app.get('/api/admin/invoices/export/custom', authenticateAdmin, asyncHandler(async (req, res) => {
+app.get('/api/admin/invoices/export/custom', authenticateAdmin, requireRole(['SUPER_ADMIN']), asyncHandler(async (req, res) => {
   const { startDate, endDate } = req.query;
 
   console.log(`📊 Custom export requested - ${startDate} to ${endDate}`);

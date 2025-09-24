@@ -313,7 +313,7 @@ model AdminUser {
   firstName   String
   lastName    String
   password    String    // Hashed
-  role        AdminRole @default(STAFF)
+  role        AdminRole @default(RESTAURANT_USER)
   isActive    Boolean   @default(true)
   lastLoginAt DateTime?
   createdAt   DateTime  @default(now())
@@ -365,9 +365,8 @@ enum PaymentStatus {
 
 enum AdminRole {
   SUPER_ADMIN
-  ADMIN
-  MANAGER
-  STAFF
+  RESTAURANT_USER
+  dELIVERY_USER
 }
 
 // Invoice records for Slovak legal compliance
