@@ -1373,32 +1373,44 @@ const authenticateAdmin = asyncHandler(async (req, res, next) => {
   }
 
   const token = authHeader.split(' ')[1];
-  console.log('🔑 Token received:', token ? 'Yes' : 'No');
-  
+  console.log('🔑 Token received:', token ? `${token.substring(0, 20)}...` : 'None');
+
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'F#zGcwr+zM*1D/9#w#66*}Qb_[jYNv');
-    console.log('✅ Token decoded:', decoded);
-    
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('🔓 Token decoded:', { id: decoded.id, role: decoded.role });
+
+    // Fetch fresh user data from database
     const admin = await prisma.adminUser.findUnique({
-      where: { id: decoded.id }
+      where: { id: decoded.id },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        isActive: true
+      }
     });
 
     if (!admin || !admin.isActive) {
-      console.log('❌ Admin not found or inactive');
+      console.log('❌ User not found or inactive');
       return res.status(401).json({
         success: false,
-        error: 'Invalid or inactive admin account'
+        error: 'Invalid user account'
       });
     }
 
-    console.log('✅ Admin authenticated:', admin.email);
-    req.admin = admin;
+    // Store user data in request object
+    req.adminUser = admin;
+    console.log('✅ User authenticated:', admin.email, admin.role);
+    
     next();
+
   } catch (error) {
-    console.log('❌ Token verification failed:', error.message);
+    console.error('❌ JWT verification failed:', error.message);
     return res.status(401).json({
       success: false,
-      error: 'Invalid token'
+      error: 'Invalid authentication token'
     });
   }
 });
