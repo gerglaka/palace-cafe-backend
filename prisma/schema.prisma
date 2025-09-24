@@ -408,3 +408,32 @@ model Invoice {
   
   @@map("invoices")
 }
+
+// Allergen reference table for EU regulations
+model Allergen {
+  id           Int                    @id @default(autoincrement())
+  code         String                 @unique // "1", "2", "3", etc.
+  isActive     Boolean                @default(true)
+  displayOrder Int                    @default(0)
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+  
+  // Relations
+  translations AllergenTranslation[]
+  
+  @@map("allergens")
+}
+
+// Multi-language support for allergens
+model AllergenTranslation {
+  id         Int      @id @default(autoincrement())
+  allergenId Int
+  language   String   // 'hu', 'en', 'sk'
+  name       String   // "Glutént tartalmazó gabona", "Cereals containing gluten"
+  
+  // Relations
+  allergen   Allergen @relation(fields: [allergenId], references: [id], onDelete: Cascade)
+  
+  @@unique([allergenId, language])
+  @@map("allergen_translations")
+}
