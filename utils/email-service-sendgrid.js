@@ -62,7 +62,7 @@ async function sendOrderStatusEmail(orderData, customerEmail) {
     
     if (orderData.status === 'READY') {
       subject = `Objednavka ${orderData.orderNumber} je pripravena - Palace Cafe`;
-      headerText = 'Objednavka pripravena na vyzdvihnutie / Rendeles keszre kesz atvevellre';
+      headerText = 'Objednavka pripravena na vyzdvihnutie / Rendeles keszen all az atvevellre';
       mainMessage = 'Vasa objednavka je pripravena na vyzdvihnutie!';
       subMessage = 'Az On rendelese keszen all az atvetelre!';
     } else if (orderData.status === 'OUT_FOR_DELIVERY') {
@@ -97,7 +97,7 @@ async function sendOrderStatusEmail(orderData, customerEmail) {
               
               ${orderData.status === 'READY' ? `
               <div style="margin-top: 20px; padding: 15px; background: #f0f8f0; border-radius: 8px;">
-                <p><strong>Adresa / Cim:</strong><br>Hradna 168/2, 945 01 Komarno</p>
+                <p><strong>Adresa / Cim:</strong><br>Namestie gen. Klapku 9, 945 01 Komarno</p>
               </div>
               ` : `
               <div style="margin-top: 20px; padding: 15px; background: #f0f8f0; border-radius: 8px;">
