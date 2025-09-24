@@ -202,7 +202,8 @@ app.get('/api/menu', asyncHandler(async (req, res) => {
         badge: item.badge,
         includesSides: item.includesSides,
         isPopular: item.isPopular,
-        spicyLevel: item.spicyLevel
+        spicyLevel: item.spicyLevel,
+        allergens: item.allergens || []
       }))
     };
   });
@@ -262,7 +263,8 @@ app.get('/api/menu/deliverable', asyncHandler(async (req, res) => {
         badge: item.badge,
         includesSides: item.includesSides,
         isPopular: item.isPopular,
-        spicyLevel: item.spicyLevel
+        spicyLevel: item.spicyLevel,
+        allergens: item.allergens || []
       }))
     };
   });
@@ -317,6 +319,30 @@ app.get('/api/customization', asyncHandler(async (req, res) => {
         isDefault: option.isDefault
       }))
     }
+  });
+}));
+
+// Get allergen reference data
+app.get('/api/allergens', asyncHandler(async (req, res) => {
+  const { lang = 'hu' } = req.query;
+  
+  const allergens = await prisma.allergen.findMany({
+    where: { isActive: true },
+    include: {
+      translations: {
+        where: { language: lang }
+      }
+    },
+    orderBy: { displayOrder: 'asc' }
+  });
+
+  res.json({
+    success: true,
+    data: allergens.map(allergen => ({
+      id: allergen.id,
+      code: allergen.code,
+      name: allergen.translations[0]?.name || 'Unknown'
+    }))
   });
 }));
 
