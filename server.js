@@ -1510,31 +1510,12 @@ app.post('/api/admin/login', loginLimiter, [
 
 // Get current admin user info (protected)
 app.get('/api/admin/auth/user', authenticateAdmin, asyncHandler(async (req, res) => {
-  console.log('📋 Getting admin user info for:', req.admin.email);
-  
   try {
-    // req.admin is already populated by the authenticateAdmin middleware
-    const admin = await prisma.adminUser.findUnique({
-      where: { id: req.admin.id },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        isActive: true,
-        lastLoginAt: true,
-        createdAt: true
-      }
-    });
-
-    if (!admin || !admin.isActive) {
-      return res.status(401).json({
-        success: false,
-        error: 'Admin account not found or inactive'
-      });
-    }
-
+    console.log('📋 Fetching user info for:', req.adminUser.email);
+    
+    // req.adminUser is already set by authenticateAdmin middleware
+    const admin = req.adminUser;
+    
     res.json({
       success: true,
       data: {
