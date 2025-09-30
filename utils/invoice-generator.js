@@ -158,8 +158,18 @@ function processOrderDataForInvoice(invoiceData) {
   orderItems.forEach((item, index) => {
     console.log(`🔄 Processing item ${index + 1}:`, item);
     
-    // Build item name (clean)
-    const itemName = cleanTextForPDF(item.name || 'Unknown Item');
+    // Parse quantity from name if present (e.g., "2x Baconburger")
+    let rawName = item.name || 'Unknown Item';
+    const match = rawName.match(/^(\d+)x\s*(.*)$/i);
+    const quantity = match ? parseInt(match[1]) : (item.quantity || 1);
+    let itemName = match ? match[2] : rawName;
+    
+    // Clean item name
+    itemName = cleanTextForPDF(itemName);
+    
+    // Calculate unit price (totalPrice is already multiplied by quantity)
+    const lineTotal = Math.round((item.totalPrice || item.unitPrice || 0) * 100) / 100;
+    const unitPrice = quantity > 0 ? Math.round((lineTotal / quantity) * 100) / 100 : lineTotal;
     
     // Build description from customizations
     const descriptionParts = [];
@@ -197,8 +207,8 @@ function processOrderDataForInvoice(invoiceData) {
     const processedItem = {
       name: itemName,
       description: description,
-      quantity: item.quantity || 1,
-      grossPrice: Math.round((item.totalPrice || item.unitPrice || 0) * 100) / 100
+      quantity: quantity,
+      grossPrice: unitPrice
     };
     
     processedItems.push(processedItem);
