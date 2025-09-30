@@ -1353,6 +1353,152 @@ app.get('/api/stripe/config', asyncHandler(async (req, res) => {
   });
 }));
 
+// ============================================
+// RESTAURANT STATUS API 
+// ============================================
+
+/**
+ * GET /api/restaurant/accepting-orders
+ * Public endpoint - check if restaurant is accepting orders
+ * Used by customer checkout page
+ */
+app.get('/api/restaurant/accepting-orders', asyncHandler(async (req, res) => {
+  console.log('🔍 Checking if restaurant is accepting orders...');
+  
+  try {
+    // Get restaurant status from database
+    const restaurant = await prisma.restaurant.findFirst({
+      select: {
+        isActive: true,
+        name: true
+      }
+    });
+
+    if (!restaurant) {
+      // If no restaurant record exists, default to accepting orders
+      return res.json({
+        success: true,
+        data: {
+          acceptingOrders: true,
+          restaurantName: 'Palace Cafe & Bar'
+        }
+      });
+    }
+
+    console.log(`✅ Restaurant status: ${restaurant.isActive ? 'OPEN' : 'CLOSED'}`);
+
+    res.json({
+      success: true,
+      data: {
+        acceptingOrders: restaurant.isActive,
+        restaurantName: restaurant.name
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error checking restaurant status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to check restaurant status'
+    });
+  }
+}));
+
+/**
+ * POST /api/admin/toggle-orders
+ * Admin-only endpoint - toggle order acceptance on/off
+ * Broadcasts change to all connected clients via Socket.io
+ */
+app.post('/api/admin/toggle-orders', authenticateAdmin, asyncHandler(async (req, res) => {
+  console.log('🔄 Admin toggling order acceptance...');
+  
+  try {
+    // Get current restaurant status
+    let restaurant = await prisma.restaurant.findFirst();
+
+    if (!restaurant) {
+      // If no restaurant exists, create one
+      restaurant = await prisma.restaurant.create({
+        data: {
+          name: 'Palace Cafe & Bar',
+          isActive: true
+        }
+      });
+    }
+
+    // Toggle the isActive status
+    const newStatus = !restaurant.isActive;
+
+    const updatedRestaurant = await prisma.restaurant.update({
+      where: { id: restaurant.id },
+      data: { isActive: newStatus }
+    });
+
+    console.log(`✅ Orders ${newStatus ? 'ENABLED' : 'DISABLED'} by ${req.admin.email}`);
+
+    // Broadcast status change to all connected clients (customers & admins)
+    io.emit('orderStatusChanged', {
+      acceptingOrders: newStatus,
+      timestamp: new Date().toISOString(),
+      changedBy: req.admin.email
+    });
+
+    res.json({
+      success: true,
+      data: {
+        acceptingOrders: newStatus,
+        restaurantName: updatedRestaurant.name
+      },
+      message: newStatus ? 'Rendelések engedélyezve' : 'Rendelések felfüggesztve'
+    });
+
+  } catch (error) {
+    console.error('❌ Error toggling orders:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to toggle order status'
+    });
+  }
+}));
+
+/**
+ * GET /api/admin/restaurant/status
+ * Admin-only endpoint - get detailed restaurant status
+ */
+app.get('/api/admin/restaurant/status', authenticateAdmin, asyncHandler(async (req, res) => {
+  console.log('📊 Admin checking restaurant status...');
+  
+  try {
+    const restaurant = await prisma.restaurant.findFirst();
+
+    if (!restaurant) {
+      return res.json({
+        success: true,
+        data: {
+          acceptingOrders: true,
+          restaurantName: 'Palace Cafe & Bar',
+          message: 'No restaurant record found - defaulting to open'
+        }
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        acceptingOrders: restaurant.isActive,
+        restaurantName: restaurant.name,
+        lastUpdated: restaurant.updatedAt
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching restaurant status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch restaurant status'
+    });
+  }
+}));
 
 
 // ============================================
