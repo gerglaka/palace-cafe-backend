@@ -200,6 +200,11 @@ function processOrderDataForInvoice(invoiceData) {
     if (item.specialNotes) {
       descriptionParts.push(`Poznámka: ${cleanTextForPDF(item.specialNotes)}`);
     }
+
+    // Add raw customizations string if present (fallback for unstructured data)
+    if (item.customizations && typeof item.customizations === 'string' && item.customizations.trim() !== '') {
+      descriptionParts.push(cleanTextForPDF(item.customizations));
+    }    
     
     const description = descriptionParts.length > 0 ? descriptionParts.join(' | ') : null;
     
@@ -216,14 +221,14 @@ function processOrderDataForInvoice(invoiceData) {
   });
   
   // STEP 3: Check if delivery order and add delivery fee
-  if (invoiceData.orderType?.trim().toUpperCase() === 'DELIVERY') {
+  if (invoiceData.order?.orderType?.trim().toUpperCase() === 'DELIVERY') {
     const deliveryItem = {
       name: 'Doručenie',
       description: null,
       quantity: 1,
       grossPrice: 2.50
     };
-    
+
     processedItems.push(deliveryItem);
     console.log('✅ Added delivery fee:', deliveryItem);
   }
