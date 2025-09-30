@@ -223,7 +223,7 @@ function processOrderDataForInvoice(invoiceData) {
   // STEP 3: Check if delivery order and add delivery fee
   if (invoiceData.order?.orderType?.trim().toUpperCase() === 'DELIVERY') {
     const deliveryItem = {
-      name: 'Doručenie',
+      name: 'Dorucenie',
       description: null,
       quantity: 1,
       grossPrice: 2.50
