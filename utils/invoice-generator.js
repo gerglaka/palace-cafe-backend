@@ -216,7 +216,7 @@ function processOrderDataForInvoice(invoiceData) {
   });
   
   // STEP 3: Check if delivery order and add delivery fee
-  if (invoiceData.orderType === 'DELIVERY') {
+  if (invoiceData.orderType?.trim().toUpperCase() === 'DELIVERY') {
     const deliveryItem = {
       name: 'Doručenie',
       description: null,
@@ -300,11 +300,11 @@ function generateInvoicePDF(invoiceData) {
       
       doc.fontSize(18)
          .fillColor(COLORS.secondary)
-         .text('FAKTÚRA', 400, 50, { align: 'right' });
+         .text(cleanTextForPDF('FAKTÚRA'), 400, 50, { align: 'right' });
       
       doc.fontSize(10)
          .fillColor(COLORS.light)
-         .text('Danovy doklad', 400, 75, { align: 'right' })
+         .text(cleanTextForPDF('Danový doklad'), 400, 75, { align: 'right' })
       
       // Line
       doc.strokeColor(COLORS.secondary)
@@ -317,7 +317,7 @@ function generateInvoicePDF(invoiceData) {
       let y = 120;
       doc.fontSize(11)
          .fillColor(COLORS.dark)
-         .text('Faktura c.:', 400, y)
+         .text(cleanTextForPDF('Faktúra c.:'), 400, y)
          .font('Helvetica-Bold')
          .fillColor(COLORS.primary)
          .text(invoiceData.invoiceNumber, 400, y + 15);
@@ -326,15 +326,15 @@ function generateInvoicePDF(invoiceData) {
       doc.font('Helvetica')
          .fillColor(COLORS.dark)
          .fontSize(10)
-         .text('Dátum vystavenia:', 400, y)
+         .text(cleanTextForPDF('Dátum vystavenia:'), 400, y)
          .text(formatDate(invoiceData.createdAt), 400, y + 12)
-         .text('Dátum splatnosti:', 400, y + 30)
+         .text(cleanTextForPDF('Dátum splatnosti:'), 400, y + 30)
          .text(formatDate(invoiceData.createdAt), 400, y + 42)
-         .text('Dátum dodanie:', 400, y + 60)
+         .text(cleanTextForPDF('Dátum dodanie:'), 400, y + 60)
          .text(formatDate(invoiceData.createdAt), 400, y + 72);
       
       y += 100;
-      doc.text('Císlo objednavky:', 400, y)
+      doc.text(cleanTextForPDF('Císlo objednávky:'), 400, y)
          .font('Helvetica-Bold')
          .text(`#${invoiceData.order?.orderNumber || 'N/A'}`, 400, y + 12);
       
@@ -343,7 +343,7 @@ function generateInvoicePDF(invoiceData) {
       doc.font('Helvetica-Bold')
          .fillColor(COLORS.secondary)
          .fontSize(11)
-         .text('Dodavatel', 50, y);
+         .text(cleanTextForPDF('Dodávateľ'), 50, y);
       
       y += 20;
       doc.font('Helvetica')
@@ -361,21 +361,30 @@ function generateInvoicePDF(invoiceData) {
       doc.font('Helvetica-Bold')
          .fillColor(COLORS.secondary)
          .fontSize(11)
-         .text('Odberatel', 50, y);
+         .text(cleanTextForPDF('Odberateľ'), 50, y);
       
       y += 20;
+      let customerY = y;
       doc.font('Helvetica')
          .fillColor(COLORS.dark)
          .fontSize(10)
-         .text(cleanCustomerData.name, 50, y);
+         .text(cleanCustomerData.name, 50, customerY);
+      
+      customerY += 12;
       
       if (cleanCustomerData.phone) {
-        doc.text(`Tel: ${cleanCustomerData.phone}`, 50, y + 12);
-        y += 12;
+        doc.text(`Tel: ${cleanCustomerData.phone}`, 50, customerY);
+        customerY += 12;
       }
       
       if (cleanCustomerData.email) {
-        doc.text(`Email: ${cleanCustomerData.email}`, 50, y + 12);
+        doc.text(`Email: ${cleanCustomerData.email}`, 50, customerY);
+        customerY += 12;
+      }
+      
+      if (cleanCustomerData.address && invoiceData.orderType?.trim().toUpperCase() === 'DELIVERY') {
+        doc.text(`Adresa: ${cleanCustomerData.address}`, 50, customerY);
+        customerY += 12;
       }
       
       // Items table header
@@ -389,10 +398,10 @@ function generateInvoicePDF(invoiceData) {
          .fill(COLORS.background);
       
       doc.fillColor(COLORS.dark)
-         .text('Položka', 55, y + 6)
+         .text(cleanTextForPDF('Položka'), 55, y + 6)
          .text('Mn.', 300, y + 6)
-         .text('Cena', 350, y + 6)
-         .text('Spolu', 470, y + 6);
+         .text(cleanTextForPDF('Cena'), 350, y + 6)
+         .text(cleanTextForPDF('Spolu'), 470, y + 6);
       
       y += 25;
       
@@ -455,11 +464,11 @@ function generateInvoicePDF(invoiceData) {
       
       doc.fontSize(10)
          .fillColor(COLORS.dark)
-         .text('Medzisucet', 310, y)
+         .text(cleanTextForPDF('Medzisúčet'), 310, y)
          .text(formatCurrency(vatBreakdown.grossAmount), 480, y, { align: 'right' });
       
       y += 15;
-      doc.text('Základ DPH 19%:', 310, y)
+      doc.text(cleanTextForPDF('Základ DPH 19%:'), 310, y)
          .text(formatCurrency(vatBreakdown.netAmount), 480, y, { align: 'right' });
       
       y += 15;
@@ -477,14 +486,14 @@ function generateInvoicePDF(invoiceData) {
       doc.fontSize(12)
          .font('Helvetica-Bold')
          .fillColor(COLORS.primary)
-         .text('CELKOM:', 310, y)
+         .text(cleanTextForPDF('CELKOM:'), 310, y)
          .text(formatCurrency(vatBreakdown.grossAmount), 480, y, { align: 'right' });
       
       // Footer
       y = 650;
       
       const paymentMethods = {
-        'CASH': 'Hotovosť',
+        'CASH': 'Hotovost',
         'CARD': 'Karta',
         'ONLINE': 'Online platba'
       };
@@ -492,17 +501,17 @@ function generateInvoicePDF(invoiceData) {
       doc.fontSize(10)
          .font('Helvetica-Bold')
          .fillColor(COLORS.secondary)
-         .text('Spôsob platby:', 50, y);
+         .text(cleanTextForPDF('Spôsob platby:'), 50, y);
       
       doc.font('Helvetica')
          .fillColor(COLORS.dark)
-         .text(paymentMethods[invoiceData.paymentMethod] || invoiceData.paymentMethod, 150, y);
+         .text(cleanTextForPDF(paymentMethods[invoiceData.paymentMethod] || invoiceData.paymentMethod), 150, y);
       
       if (invoiceData.paymentMethod === 'CARD') {
         y += 15;
         doc.font('Helvetica-Bold')
            .fillColor(COLORS.primary)
-           .text('UHRADENÉ', 50, y);
+           .text(cleanTextForPDF('UHRADENÉ'), 50, y);
       }
       
       y += 30;
