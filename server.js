@@ -1781,34 +1781,48 @@ app.post('/api/admin/toggle-orders', authenticateAdmin, asyncHandler(async (req,
   console.log('🔄 Admin toggling order acceptance...');
   
   try {
+    // Get admin info safely (works with req.admin OR req.user)
+    const adminEmail = req.admin?.email || req.user?.email || 'Unknown Admin';
+    console.log('👤 Admin user:', adminEmail);
+    
     // Get current restaurant status
     let restaurant = await prisma.restaurant.findFirst();
 
     if (!restaurant) {
+      console.log('⚠️ No restaurant found, creating default...');
+      
       // If no restaurant exists, create one
       restaurant = await prisma.restaurant.create({
         data: {
           name: 'Palace Cafe & Bar',
-          isActive: true
+          isActive: true,
+          deliveryFee: 2.50,
+          minimumOrder: 5.00,
+          deliveryTime: '30-45 min',
+          country: 'Slovakia'
         }
       });
+      
+      console.log('✅ Created new restaurant record:', restaurant.id);
     }
 
     // Toggle the isActive status
     const newStatus = !restaurant.isActive;
+
+    console.log(`🔄 Changing status from ${restaurant.isActive} to ${newStatus}`);
 
     const updatedRestaurant = await prisma.restaurant.update({
       where: { id: restaurant.id },
       data: { isActive: newStatus }
     });
 
-    console.log(`✅ Orders ${newStatus ? 'ENABLED' : 'DISABLED'} by ${req.admin.email}`);
+    console.log(`✅ Orders ${newStatus ? 'ENABLED' : 'DISABLED'} by ${adminEmail}`);
 
     // Broadcast status change to all connected clients (customers & admins)
     io.emit('orderStatusChanged', {
       acceptingOrders: newStatus,
       timestamp: new Date().toISOString(),
-      changedBy: req.admin.email
+      changedBy: adminEmail
     });
 
     res.json({
@@ -1822,9 +1836,13 @@ app.post('/api/admin/toggle-orders', authenticateAdmin, asyncHandler(async (req,
 
   } catch (error) {
     console.error('❌ Error toggling orders:', error);
+    console.error('Error details:', error.message);
+    console.error('Error stack:', error.stack);
+    
     res.status(500).json({
       success: false,
-      error: 'Failed to toggle order status'
+      error: 'Failed to toggle order status',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 }));
