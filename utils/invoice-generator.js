@@ -220,6 +220,16 @@ function processOrderDataForInvoice(invoiceData) {
     console.log('✅ Processed item:', processedItem);
   });
   
+  const packagingItem = {
+    name: 'Csomagolas',
+    description: 'Balenie',
+    quantity: 1,
+    grossPrice: 0.50
+  };
+  
+  processedItems.push(packagingItem);
+  console.log('✅ Added packaging fee:', packagingItem);
+  
   // STEP 3: Check if delivery order and add delivery fee
   if (invoiceData.order?.orderType?.trim().toUpperCase() === 'DELIVERY') {
     const deliveryItem = {

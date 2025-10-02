@@ -393,6 +393,7 @@ app.post('/api/orders', orderLimiter, asyncHandler(async (req, res) => {
   try {
     // Get restaurant settings for delivery fee
     const restaurant = await prisma.restaurant.findFirst();
+    const packagingFee = 0.50;
     const deliveryFee = (orderType === 'DELIVERY') ? restaurant?.deliveryFee || 2.50 : 0;
 
     // Calculate totals and prepare order items
@@ -487,7 +488,7 @@ app.post('/api/orders', orderLimiter, asyncHandler(async (req, res) => {
       });
     }
 
-    const total = subtotal + deliveryFee;
+    const total = subtotal + packagingFee + deliveryFee;
 
     // Create order in database
     const order = await prisma.order.create({
