@@ -4452,7 +4452,7 @@ app.get('/api/admin/invoices/:id', authenticateAdmin, requireRole(['SUPER_ADMIN'
       orderType: invoice.orderType || invoice.order?.orderType,
       subtotal: invoice.order?.subtotal || 0,
       deliveryFee: invoice.order?.deliveryFee || 0,
-      packagingFee: invoice.order?.packagingFee || 0,
+      packagingFee: invoice.packagingFee || invoice.order?.packagingFee || 0,
       totalNet: invoice.totalNet,
       totalVat: invoice.vatAmount,
       totalGross: invoice.totalGross,
