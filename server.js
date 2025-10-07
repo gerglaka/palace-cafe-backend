@@ -350,8 +350,8 @@ app.get('/api/allergens', asyncHandler(async (req, res) => {
 // ORDER MANAGEMENT APIs
 // ============================================
 
-const { generateInvoicePDF, generateInvoiceNumber, getNextInvoiceCounter, calculateVATBreakdown } = require('./utils/invoice-generator');
-const { sendInvoiceEmail, sendOrderStatusEmail, testEmailConfig } = require('./utils/email-service-sendgrid');
+const { generateInvoicePDF, generateStornoInvoicePDF, generateInvoiceNumber, generateStornoInvoiceNumber, getNextInvoiceCounter, calculateVATBreakdown } = require('./utils/invoice-generator');
+const { sendInvoiceEmail, sendOrderStatusEmail, sendStornoInvoiceEmail, testEmailConfig } = require('./utils/email-service-sendgrid');
 
 // Place new order
 app.post('/api/orders', orderLimiter, asyncHandler(async (req, res) => {
@@ -2391,26 +2391,384 @@ app.get('/api/admin/dashboard/stats', authenticateAdmin, asyncHandler(async (req
 app.put('/api/admin/orders/:id/cancel', authenticateAdmin, asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  const updatedOrder = await prisma.order.update({
-    where: { id: parseInt(id) },
-    data: {
-      status: 'CANCELLED'
+  console.log(`🚫 Cancelling order ${id} and generating Storno invoice...`);
+
+  try {
+    // Step 1: Get the order with all relations
+    const order = await prisma.order.findUnique({
+      where: { id: parseInt(id) },
+      include: {
+        items: {
+          include: {
+            menuItem: {
+              include: {
+                translations: true
+              }
+            }
+          }
+        },
+        invoice: true // Get existing invoice
+      }
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        error: 'Order not found'
+      });
     }
-  });
 
-  //mit status update with consistent payload
-  io.emit('orderStatusUpdate', {
-    id: updatedOrder.id,
-    orderNumber: updatedOrder.orderNumber,
-    status: updatedOrder.status
-  });
+    // Step 2: Check if order already has an invoice
+    if (!order.invoice) {
+      console.log('⚠️ Order has no invoice yet, cannot create Storno');
+      
+      // Just cancel the order without Storno
+      const updatedOrder = await prisma.order.update({
+        where: { id: parseInt(id) },
+        data: { status: 'CANCELLED' }
+      });
 
-  console.log('📡 WebSocket emitted: orderStatusUpdate for', updatedOrder.orderNumber);
+      // Emit cancellation
+      io.emit('orderStatusUpdate', {
+        id: updatedOrder.id,
+        orderNumber: updatedOrder.orderNumber,
+        status: updatedOrder.status
+      });
 
-  res.json({
-    success: true,
-    data: updatedOrder
-  });
+      return res.json({
+        success: true,
+        message: 'Order cancelled (no invoice to storno)',
+        data: updatedOrder
+      });
+    }
+
+    // Step 3: Get the original invoice
+    const originalInvoice = order.invoice;
+
+    console.log(`📄 Original invoice found: ${originalInvoice.invoiceNumber}`);
+
+    // Step 4: Check if already cancelled
+    if (originalInvoice.isCancelled) {
+      return res.status(400).json({
+        success: false,
+        error: 'Order already has a Storno invoice'
+      });
+    }
+
+    // Step 5: Generate Storno invoice number (same sequence as normal invoices)
+    const currentYear = new Date().getFullYear();
+    const stornoInvoiceNumber = await generateStornoInvoiceNumber(
+      order.paymentMethod,
+      currentYear,
+      prisma
+    );
+
+    console.log(`📋 Generated Storno invoice number: ${stornoInvoiceNumber}`);
+
+    // Step 6: Prepare Storno invoice data (negative amounts)
+    const stornoInvoiceData = {
+      invoiceNumber: stornoInvoiceNumber,
+      orderId: order.id,
+      invoiceType: 'STORNO',
+      originalInvoiceId: originalInvoice.id,
+      customerName: order.customerName,
+      customerEmail: order.customerEmail,
+      customerPhone: order.customerPhone,
+      subtotal: -Math.abs(originalInvoice.subtotal),
+      deliveryFee: -Math.abs(originalInvoice.deliveryFee),
+      packagingFee: -Math.abs(originalInvoice.packagingFee),
+      totalNet: -Math.abs(originalInvoice.totalNet),
+      vatAmount: -Math.abs(originalInvoice.vatAmount),
+      totalGross: -Math.abs(originalInvoice.totalGross),
+      paymentMethod: order.paymentMethod,
+      orderItems: originalInvoice.orderItems, // Same items as original
+      emailSent: false,
+      createdAt: new Date(),
+      order: {
+        orderNumber: order.orderNumber,
+        orderType: order.orderType
+      }
+    };
+
+    // Step 7: Generate Storno PDF
+    console.log('📄 Generating Storno PDF...');
+    const stornoPdfBuffer = await generateStornoInvoicePDF(
+      stornoInvoiceData,
+      originalInvoice.invoiceNumber
+    );
+
+    // Step 8: Create Storno invoice in database
+    const stornoInvoice = await prisma.invoice.create({
+      data: {
+        invoiceNumber: stornoInvoiceNumber,
+        orderId: order.id,
+        invoiceType: 'STORNO',
+        originalInvoiceId: originalInvoice.id,
+        customerName: order.customerName,
+        customerEmail: order.customerEmail,
+        customerPhone: order.customerPhone,
+        subtotal: stornoInvoiceData.subtotal,
+        deliveryFee: stornoInvoiceData.deliveryFee,
+        packagingFee: stornoInvoiceData.packagingFee,
+        totalNet: stornoInvoiceData.totalNet,
+        vatAmount: stornoInvoiceData.vatAmount,
+        totalGross: stornoInvoiceData.totalGross,
+        paymentMethod: order.paymentMethod,
+        orderItems: originalInvoice.orderItems,
+        emailSent: false
+      }
+    });
+
+    console.log(`✅ Storno invoice created in database: ${stornoInvoice.id}`);
+
+    // Step 9: Mark original invoice as cancelled
+    await prisma.invoice.update({
+      where: { id: originalInvoice.id },
+      data: {
+        isCancelled: true,
+        cancelledAt: new Date()
+      }
+    });
+
+    console.log(`✅ Original invoice ${originalInvoice.invoiceNumber} marked as cancelled`);
+
+    // Step 10: Update order status to CANCELLED
+    const updatedOrder = await prisma.order.update({
+      where: { id: parseInt(id) },
+      data: { status: 'CANCELLED' }
+    });
+
+    console.log(`✅ Order ${order.orderNumber} status updated to CANCELLED`);
+
+    // Step 11: Send Storno email to customer
+    if (order.customerEmail) {
+      console.log(`📧 Sending Storno email to ${order.customerEmail}...`);
+      
+      const emailResult = await sendStornoInvoiceEmail(
+        stornoInvoiceData,
+        originalInvoice,
+        stornoPdfBuffer,
+        order.customerEmail
+      );
+
+      if (emailResult.success) {
+        // Update email sent status
+        await prisma.invoice.update({
+          where: { id: stornoInvoice.id },
+          data: {
+            emailSent: true,
+            emailSentAt: new Date(),
+            emailAttempts: 1
+          }
+        });
+        console.log(`✅ Storno email sent successfully`);
+      } else {
+        console.log(`⚠️ Failed to send Storno email: ${emailResult.error}`);
+      }
+    }
+
+    // Step 12: Emit WebSocket event
+    io.emit('orderCancelled', {
+      id: updatedOrder.id,
+      orderNumber: updatedOrder.orderNumber,
+      status: 'CANCELLED',
+      stornoInvoiceNumber: stornoInvoiceNumber,
+      originalInvoiceNumber: originalInvoice.invoiceNumber
+    });
+
+    console.log(`✅ Order cancellation complete with Storno invoice`);
+
+    // Step 13: Return success response
+    res.json({
+      success: true,
+      message: 'Order cancelled and Storno invoice generated',
+      data: {
+        order: updatedOrder,
+        stornoInvoice: {
+          id: stornoInvoice.id,
+          invoiceNumber: stornoInvoice.invoiceNumber,
+          originalInvoiceNumber: originalInvoice.invoiceNumber,
+          totalGross: stornoInvoice.totalGross
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error cancelling order and generating Storno:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to cancel order'
+    });
+  }
+}));
+
+// Generate Storno invoice manually for already cancelled order
+app.post('/api/admin/orders/:id/generate-storno', authenticateAdmin, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  console.log(`📋 Manually generating Storno invoice for order ${id}...`);
+
+  try {
+    // Get the order with invoice
+    const order = await prisma.order.findUnique({
+      where: { id: parseInt(id) },
+      include: {
+        items: {
+          include: {
+            menuItem: {
+              include: {
+                translations: true
+              }
+            }
+          }
+        },
+        invoice: true
+      }
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        error: 'Order not found'
+      });
+    }
+
+    if (!order.invoice) {
+      return res.status(400).json({
+        success: false,
+        error: 'Order has no invoice'
+      });
+    }
+
+    const originalInvoice = order.invoice;
+
+    // Check if already has Storno
+    const existingStorno = await prisma.invoice.findFirst({
+      where: {
+        originalInvoiceId: originalInvoice.id,
+        invoiceType: 'STORNO'
+      }
+    });
+
+    if (existingStorno) {
+      return res.status(400).json({
+        success: false,
+        error: 'Storno invoice already exists',
+        data: existingStorno
+      });
+    }
+
+    // Generate Storno (same logic as cancel endpoint)
+    const currentYear = new Date().getFullYear();
+    const stornoInvoiceNumber = await generateStornoInvoiceNumber(
+      order.paymentMethod,
+      currentYear,
+      prisma
+    );
+
+    const stornoInvoiceData = {
+      invoiceNumber: stornoInvoiceNumber,
+      orderId: order.id,
+      invoiceType: 'STORNO',
+      originalInvoiceId: originalInvoice.id,
+      customerName: order.customerName,
+      customerEmail: order.customerEmail,
+      customerPhone: order.customerPhone,
+      subtotal: -Math.abs(originalInvoice.subtotal),
+      deliveryFee: -Math.abs(originalInvoice.deliveryFee),
+      packagingFee: -Math.abs(originalInvoice.packagingFee),
+      totalNet: -Math.abs(originalInvoice.totalNet),
+      vatAmount: -Math.abs(originalInvoice.vatAmount),
+      totalGross: -Math.abs(originalInvoice.totalGross),
+      paymentMethod: order.paymentMethod,
+      orderItems: originalInvoice.orderItems,
+      order: {
+        orderNumber: order.orderNumber,
+        orderType: order.orderType
+      }
+    };
+
+    // Generate PDF
+    const stornoPdfBuffer = await generateStornoInvoicePDF(
+      stornoInvoiceData,
+      originalInvoice.invoiceNumber
+    );
+
+    // Create in database
+    const stornoInvoice = await prisma.invoice.create({
+      data: {
+        invoiceNumber: stornoInvoiceNumber,
+        orderId: order.id,
+        invoiceType: 'STORNO',
+        originalInvoiceId: originalInvoice.id,
+        customerName: order.customerName,
+        customerEmail: order.customerEmail,
+        customerPhone: order.customerPhone,
+        subtotal: stornoInvoiceData.subtotal,
+        deliveryFee: stornoInvoiceData.deliveryFee,
+        packagingFee: stornoInvoiceData.packagingFee,
+        totalNet: stornoInvoiceData.totalNet,
+        vatAmount: stornoInvoiceData.vatAmount,
+        totalGross: stornoInvoiceData.totalGross,
+        paymentMethod: order.paymentMethod,
+        orderItems: originalInvoice.orderItems,
+        emailSent: false
+      }
+    });
+
+    // Mark original as cancelled
+    await prisma.invoice.update({
+      where: { id: originalInvoice.id },
+      data: {
+        isCancelled: true,
+        cancelledAt: new Date()
+      }
+    });
+
+    // Send email
+    if (order.customerEmail) {
+      const emailResult = await sendStornoInvoiceEmail(
+        stornoInvoiceData,
+        originalInvoice,
+        stornoPdfBuffer,
+        order.customerEmail
+      );
+
+      if (emailResult.success) {
+        await prisma.invoice.update({
+          where: { id: stornoInvoice.id },
+          data: {
+            emailSent: true,
+            emailSentAt: new Date(),
+            emailAttempts: 1
+          }
+        });
+      }
+    }
+
+    console.log(`✅ Storno invoice generated manually: ${stornoInvoiceNumber}`);
+
+    res.json({
+      success: true,
+      message: 'Storno invoice generated successfully',
+      data: {
+        stornoInvoice: {
+          id: stornoInvoice.id,
+          invoiceNumber: stornoInvoice.invoiceNumber,
+          originalInvoiceNumber: originalInvoice.invoiceNumber,
+          totalGross: stornoInvoice.totalGross,
+          pdfBuffer: stornoPdfBuffer.toString('base64') // Send PDF to frontend
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error generating manual Storno:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to generate Storno invoice'
+    });
+  }
 }));
 
 
@@ -4193,6 +4551,14 @@ app.get('/api/admin/invoices/overview', authenticateAdmin, requireRole(['SUPER_A
       paymentStats[item.paymentMethod] = item._count;
     });
 
+    // ✅ NEW: Count storno invoices
+    const stornoCount = await prisma.invoice.count({
+      where: {
+        invoiceType: 'STORNO',
+        createdAt: { gte: startOfMonth }
+      }
+    });
+
     const overviewData = {
       todayInvoices: todayStats._count || 0,
       todayRevenue: todayStats._sum.totalGross || 0,
@@ -4229,6 +4595,7 @@ app.get('/api/admin/invoices', authenticateAdmin, asyncHandler(async (req, res) 
       dateRange = 'month',
       paymentMethod = 'all',
       orderType = 'all',
+      invoiceType = 'all',
       startDate,
       endDate,
       sortBy = 'createdAt',
@@ -4290,6 +4657,11 @@ app.get('/api/admin/invoices', authenticateAdmin, asyncHandler(async (req, res) 
       whereClause.orderType = orderType;
     }
 
+    // ✅ NEW: Invoice type filtering (NORMAL or STORNO)
+    if (invoiceType !== 'all') {
+      whereClause.invoiceType = invoiceType;
+    }
+
     // Search functionality
     if (search) {
       whereClause.OR = [
@@ -4334,9 +4706,23 @@ app.get('/api/admin/invoices', authenticateAdmin, asyncHandler(async (req, res) 
           select: {
             id: true,
             orderNumber: true,
-            orderType: true
+            orderType: true,
+            status: true
           }
-        }
+        },
+        originalInvoice: {
+          select: {
+            invoiceNumber: true,
+            id: true
+          }
+        },
+        stornoInvoices: {
+          select: {
+            invoiceNumber: true,
+            id: true,
+            createdAt: true
+          }
+        } 
       }
     });
 
@@ -4345,6 +4731,10 @@ app.get('/api/admin/invoices', authenticateAdmin, asyncHandler(async (req, res) 
     const processedInvoices = invoices.map(invoice => ({
       id: invoice.id,
       invoiceNumber: invoice.invoiceNumber,
+      invoiceType: invoice.invoiceType,
+      isCancelled: invoice.isCancelled,
+      originalInvoiceNumber: invoice.originalInvoice?.invoiceNumber,
+      hasStorno: invoice.stornoInvoices?.length > 0,
       customerName: invoice.customerName,
       customerEmail: invoice.customerEmail,
       customerPhone: invoice.customerPhone,
@@ -4358,7 +4748,8 @@ app.get('/api/admin/invoices', authenticateAdmin, asyncHandler(async (req, res) 
       createdAt: invoice.createdAt,
       dueDate: invoice.dueDate,
       orderId: invoice.order?.id,
-      orderNumber: invoice.order?.orderNumber
+      orderNumber: invoice.order?.orderNumber,
+      orderStatus: invoice.order?.status
     }));
 
     res.json({
@@ -4406,6 +4797,22 @@ app.get('/api/admin/invoices/:id', authenticateAdmin, requireRole(['SUPER_ADMIN'
               }
             }
           }
+        },
+        originalInvoice: {
+          select: {
+            invoiceNumber: true,
+            id: true,
+            totalGross: true,
+            createdAt: true
+          }
+        },
+        stornoInvoices: {
+          select: {
+            invoiceNumber: true,
+            id: true,
+            totalGross: true,
+            createdAt: true
+          }
         }
       }
     });
@@ -4448,6 +4855,11 @@ app.get('/api/admin/invoices/:id', authenticateAdmin, requireRole(['SUPER_ADMIN'
     const invoiceDetails = {
       id: invoice.id,
       invoiceNumber: invoice.invoiceNumber,
+      invoiceType: invoice.invoiceType, 
+      isCancelled: invoice.isCancelled, 
+      cancelledAt: invoice.cancelledAt,
+      originalInvoice: invoice.originalInvoice,
+      stornoInvoices: invoice.stornoInvoices,            
       customerName: invoice.customerName,
       customerEmail: invoice.customerEmail,
       customerPhone: invoice.customerPhone,
@@ -4506,6 +4918,11 @@ app.get('/api/admin/invoices/:id/pdf', authenticateAdmin, requireRole(['SUPER_AD
                 }
               }
             }
+          },
+          originalInvoice: {
+            select: {
+              invoiceNumber: true
+            }
           }
         }
       }
@@ -4520,11 +4937,20 @@ app.get('/api/admin/invoices/:id/pdf', authenticateAdmin, requireRole(['SUPER_AD
 
     console.log(`📋 Generating PDF for invoice ${invoice.invoiceNumber}`);
 
-    // Generate PDF from stored data using your existing generator
-    const pdfBuffer = await generateInvoicePDF({
-      ...invoice,
-      orderItems: invoice.orderItems // This is stored as JSON
-    });
+    // Generate appropriate PDF based on type
+    let pdfBuffer;
+    
+    if (invoice.invoiceType === 'STORNO') {
+      pdfBuffer = await generateStornoInvoicePDF(
+        { ...invoice, orderItems: invoice.orderItems },
+        invoice.originalInvoice.invoiceNumber
+      );
+    } else {
+      pdfBuffer = await generateInvoicePDF({
+        ...invoice,
+        orderItems: invoice.orderItems
+      });
+    }
 
     // Set headers for PDF download
     res.setHeader('Content-Type', 'application/pdf');
@@ -5040,6 +5466,167 @@ app.get('/api/admin/invoices/export/custom', authenticateAdmin, requireRole(['SU
       success: false,
       error: 'Failed to generate custom export'
     });
+  }
+}));
+
+// ============================================
+// STORNO INVOICE ENDPOINTS
+// ============================================
+
+// Generate Storno invoice manually
+app.post('/api/admin/orders/:id/generate-storno', authenticateAdmin, requireRole(['SUPER_ADMIN']), asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  console.log(`📋 Manually generating Storno invoice for order ${id}...`);
+
+  try {
+    const order = await prisma.order.findUnique({
+      where: { id: parseInt(id) },
+      include: {
+        items: {
+          include: {
+            menuItem: {
+              include: {
+                translations: true
+              }
+            }
+          }
+        },
+        invoice: true
+      }
+    });
+
+    if (!order) {
+      return res.status(404).json({ success: false, error: 'Order not found' });
+    }
+
+    if (!order.invoice) {
+      return res.status(400).json({ success: false, error: 'Order has no invoice' });
+    }
+
+    const originalInvoice = order.invoice;
+
+    // Check if already has Storno
+    const existingStorno = await prisma.invoice.findFirst({
+      where: {
+        originalInvoiceId: originalInvoice.id,
+        invoiceType: 'STORNO'
+      }
+    });
+
+    if (existingStorno) {
+      return res.status(400).json({
+        success: false,
+        error: 'Storno invoice already exists',
+        data: existingStorno
+      });
+    }
+
+    // Generate Storno
+    const currentYear = new Date().getFullYear();
+    const stornoInvoiceNumber = await generateStornoInvoiceNumber(
+      order.paymentMethod,
+      currentYear,
+      prisma
+    );
+
+    const stornoInvoiceData = {
+      invoiceNumber: stornoInvoiceNumber,
+      orderId: order.id,
+      invoiceType: 'STORNO',
+      originalInvoiceId: originalInvoice.id,
+      customerName: order.customerName,
+      customerEmail: order.customerEmail,
+      customerPhone: order.customerPhone,
+      subtotal: -Math.abs(originalInvoice.subtotal),
+      deliveryFee: -Math.abs(originalInvoice.deliveryFee),
+      packagingFee: -Math.abs(originalInvoice.packagingFee),
+      totalNet: -Math.abs(originalInvoice.totalNet),
+      vatAmount: -Math.abs(originalInvoice.vatAmount),
+      totalGross: -Math.abs(originalInvoice.totalGross),
+      paymentMethod: order.paymentMethod,
+      orderItems: originalInvoice.orderItems,
+      order: {
+        orderNumber: order.orderNumber,
+        orderType: order.orderType
+      }
+    };
+
+    // Generate PDF
+    const stornoPdfBuffer = await generateStornoInvoicePDF(
+      stornoInvoiceData,
+      originalInvoice.invoiceNumber
+    );
+
+    // Create in database
+    const stornoInvoice = await prisma.invoice.create({
+      data: {
+        invoiceNumber: stornoInvoiceNumber,
+        orderId: order.id,
+        invoiceType: 'STORNO',
+        originalInvoiceId: originalInvoice.id,
+        customerName: order.customerName,
+        customerEmail: order.customerEmail,
+        customerPhone: order.customerPhone,
+        subtotal: stornoInvoiceData.subtotal,
+        deliveryFee: stornoInvoiceData.deliveryFee,
+        packagingFee: stornoInvoiceData.packagingFee,
+        totalNet: stornoInvoiceData.totalNet,
+        vatAmount: stornoInvoiceData.vatAmount,
+        totalGross: stornoInvoiceData.totalGross,
+        paymentMethod: order.paymentMethod,
+        orderItems: originalInvoice.orderItems,
+        emailSent: false
+      }
+    });
+
+    // Mark original as cancelled
+    await prisma.invoice.update({
+      where: { id: originalInvoice.id },
+      data: {
+        isCancelled: true,
+        cancelledAt: new Date()
+      }
+    });
+
+    // Send email
+    if (order.customerEmail) {
+      const emailResult = await sendStornoInvoiceEmail(
+        stornoInvoiceData,
+        originalInvoice,
+        stornoPdfBuffer,
+        order.customerEmail
+      );
+
+      if (emailResult.success) {
+        await prisma.invoice.update({
+          where: { id: stornoInvoice.id },
+          data: {
+            emailSent: true,
+            emailSentAt: new Date(),
+            emailAttempts: 1
+          }
+        });
+      }
+    }
+
+    console.log(`✅ Storno invoice generated manually: ${stornoInvoiceNumber}`);
+
+    res.json({
+      success: true,
+      message: 'Storno invoice generated successfully',
+      data: {
+        stornoInvoice: {
+          id: stornoInvoice.id,
+          invoiceNumber: stornoInvoice.invoiceNumber,
+          originalInvoiceNumber: originalInvoice.invoiceNumber,
+          totalGross: stornoInvoice.totalGross
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error generating manual Storno:', error);
+    res.status(500).json({ success: false, error: error.message || 'Failed to generate Storno invoice' });
   }
 }));
 

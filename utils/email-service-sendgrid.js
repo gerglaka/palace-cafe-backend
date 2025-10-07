@@ -343,6 +343,215 @@ Hradná 168/2, 945 01 Komárno
 }
 
 /**
+ * Send STORNO invoice email to customer
+ */
+async function sendStornoInvoiceEmail(stornoInvoiceData, originalInvoice, pdfBuffer, customerEmail) {
+  try {
+    console.log(`📧 Preparing STORNO invoice email for ${customerEmail}`);
+    
+    if (!customerEmail || !customerEmail.includes('@')) {
+      console.log('⚠️ Invalid email address, skipping storno email');
+      return { success: false, error: 'Invalid email address' };
+    }
+
+    // Initialize SendGrid if not already done
+    if (!isInitialized) {
+      const initialized = initializeSendGrid();
+      if (!initialized) {
+        console.log('⚠️ SendGrid not configured, skipping email send');
+        return { success: false, error: 'SendGrid not configured' };
+      }
+    }
+
+    const subject = `Storno faktúra ${stornoInvoiceData.invoiceNumber} - Objednávka zrušená`;
+    
+    // Convert PDF buffer to base64
+    const pdfBase64 = pdfBuffer.toString('base64');
+    
+    const msg = {
+      to: customerEmail,
+      from: {
+        email: SENDGRID_CONFIG.from.email,
+        name: SENDGRID_CONFIG.from.name
+      },
+      replyTo: SENDGRID_CONFIG.replyTo,
+      subject: subject,
+      html: `
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #C41E3A, #38141A);
+            color: white;
+            text-align: center;
+            padding: 30px 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+        .content {
+            background: #f9f9f9;
+            padding: 25px;
+            border-radius: 10px;
+        }
+        .alert-box {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .invoice-info {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #C41E3A;
+            margin: 20px 0;
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚫 Objednávka zrušená / Rendelés törölve</h1>
+        <p>Storno faktúra / Sztornó számla</p>
+    </div>
+    
+    <div class="content">
+        <h2>Dobrý deň ${stornoInvoiceData.customerName},</h2>
+        <p><strong>Jó napot ${stornoInvoiceData.customerName},</strong></p>
+        
+        <div class="alert-box">
+            <p><strong>⚠️ Vaša objednávka #${stornoInvoiceData.order?.orderNumber} bola zrušená.</strong></p>
+            <p><em>Az Ön ${stornoInvoiceData.order?.orderNumber} számú rendelése törölve lett.</em></p>
+        </div>
+        
+        <p>
+            V prílohe nájdete storno faktúru, ktorá ruší pôvodnú faktúru ${originalInvoice.invoiceNumber}.
+            Ak ste už zaplatili, suma bude vrátená.
+        </p>
+        <p>
+            <em>A mellékletben megtalálja a stornó számlát, amely érvényteleníti az eredeti ${originalInvoice.invoiceNumber} számlát.
+            Ha már fizetett, az összeget visszatérítjük.</em>
+        </p>
+        
+        <div class="invoice-info">
+            <h3>📋 Detaily / Részletek</h3>
+            <div class="detail-row">
+                <span>Storno faktúra / Stornó számla:</span>
+                <strong>${stornoInvoiceData.invoiceNumber}</strong>
+            </div>
+            <div class="detail-row">
+                <span>Pôvodná faktúra / Eredeti számla:</span>
+                <strong>${originalInvoice.invoiceNumber}</strong>
+            </div>
+            <div class="detail-row">
+                <span>Číslo objednávky / Rendelés száma:</span>
+                <strong>#${stornoInvoiceData.order?.orderNumber || 'N/A'}</strong>
+            </div>
+            <div class="detail-row">
+                <span>Stornovaná suma / Sztornózott összeg:</span>
+                <strong style="color: #C41E3A;">${formatCurrency(Math.abs(stornoInvoiceData.totalGross))}</strong>
+            </div>
+        </div>
+        
+        <p style="margin-top: 30px;">
+            Ospravedlňujeme sa za nepríjemnosti. Pre otázky nás kontaktujte.<br>
+            <em>Elnézést kérünk a kellemetlenségekért. Kérdések esetén vegye fel velünk a kapcsolatot.</em>
+        </p>
+    </div>
+    
+    <div class="footer">
+        <p>
+            <strong>Palace Cafe & Street Food s.r.o.</strong><br>
+            Hradná 168/2, 945 01 Komárno<br>
+            IČO: 56384840 | DIČ: 2122291578 | IČ DPH: SK2122291578
+        </p>
+        <p style="margin-top: 20px; font-size: 12px; color: #999;">
+            Kontakt: ${SENDGRID_CONFIG.replyTo}
+        </p>
+    </div>
+</body>
+</html>
+      `,
+      text: `
+Palace Cafe & Street Food - Storno faktúra ${stornoInvoiceData.invoiceNumber}
+
+Dobrý deň ${stornoInvoiceData.customerName},
+
+Vaša objednávka #${stornoInvoiceData.order?.orderNumber} bola zrušená.
+
+DETAILY:
+- Storno faktúra: ${stornoInvoiceData.invoiceNumber}
+- Pôvodná faktúra: ${originalInvoice.invoiceNumber}
+- Stornovaná suma: ${formatCurrency(Math.abs(stornoInvoiceData.totalGross))}
+
+V prílohe nájdete storno faktúru.
+
+Ospravedlňujeme sa za nepríjemnosti.
+
+Palace Cafe & Street Food s.r.o.
+Hradná 168/2, 945 01 Komárno
+Kontakt: ${SENDGRID_CONFIG.replyTo}
+`,
+      attachments: [
+        {
+          content: pdfBase64,
+          filename: `storno-faktura-${stornoInvoiceData.invoiceNumber}.pdf`,
+          type: 'application/pdf',
+          disposition: 'attachment'
+        }
+      ],
+      customArgs: {
+        'storno_invoice_id': stornoInvoiceData.id.toString(),
+        'original_invoice_id': originalInvoice.id.toString(),
+        'order_id': stornoInvoiceData.orderId.toString()
+      }
+    };
+
+    const result = await sgMail.send(msg);
+    console.log(`✅ Storno invoice email sent to ${customerEmail}`);
+    
+    return { 
+      success: true, 
+      messageId: result[0].headers['x-message-id'] 
+    };
+    
+  } catch (error) {
+    console.error('❌ Failed to send storno email:', error);
+    
+    if (error.response) {
+      console.error('SendGrid API Error:', {
+        statusCode: error.response.statusCode,
+        body: error.response.body
+      });
+    }
+    
+    return { success: false, error: error.message };
+  }
+}
+
+/**
  * Generate email content for invoice (same as WebSupport version)
  */
 function generateInvoiceEmailContent(invoiceData) {
@@ -642,6 +851,7 @@ module.exports = {
   sendInvoiceEmail,
   sendOrderConfirmationEmail, 
   sendOrderStatusEmail,
+  sendStornoInvoiceEmail,
   testEmailConfig,
   EMAIL_CONFIG: SENDGRID_CONFIG // For compatibility
 };

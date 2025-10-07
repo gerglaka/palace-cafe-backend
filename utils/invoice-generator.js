@@ -105,6 +105,15 @@ function generateInvoiceNumber(paymentMethod, year, counter) {
 }
 
 /**
+ * Generate STORNO invoice number
+ */
+async function generateStornoInvoiceNumber(paymentMethod, year, prisma) {
+  // Use the SAME counter logic as normal invoices
+  const counter = await getNextInvoiceCounter(paymentMethod, year, prisma);
+  return generateInvoiceNumber(paymentMethod, year, counter);
+}
+
+/**
  * Get next invoice counter
  */
 async function getNextInvoiceCounter(paymentMethod, year, prisma) {
@@ -278,6 +287,36 @@ function processOrderDataForInvoice(invoiceData) {
     vatBreakdown,
     totalGrossAmount
   };
+}
+
+/**
+ * Process order data for STORNO invoice (negative amounts)
+ * Converts all prices to negative values
+ */
+function processOrderDataForStornoInvoice(invoiceData) {
+  console.log('🔄 Starting STORNO invoice data processing...');
+  
+  // Use the same processing as normal invoice
+  const processed = processOrderDataForInvoice(invoiceData);
+  
+  // Convert all amounts to NEGATIVE
+  processed.processedItems = processed.processedItems.map(item => ({
+    ...item,
+    grossPrice: -Math.abs(item.grossPrice) // Force negative
+  }));
+  
+  // Convert VAT breakdown to negative
+  processed.vatBreakdown = {
+    netAmount: -Math.abs(processed.vatBreakdown.netAmount),
+    vatAmount: -Math.abs(processed.vatBreakdown.vatAmount),
+    grossAmount: -Math.abs(processed.vatBreakdown.grossAmount)
+  };
+  
+  processed.totalGrossAmount = -Math.abs(processed.totalGrossAmount);
+  
+  console.log('✅ STORNO processing complete - all amounts negative');
+  
+  return processed;
 }
 
 /**
@@ -561,13 +600,266 @@ function generateInvoicePDF(invoiceData) {
   });
 }
 
+/**
+ * Generate STORNO invoice PDF
+ * Same as normal invoice but with STORNO header and negative amounts
+ */
+function generateStornoInvoicePDF(invoiceData, originalInvoiceNumber) {
+  return new Promise((resolve, reject) => {
+    try {
+      console.log('📄 Starting STORNO PDF generation...');
+      
+      // Process with negative amounts
+      const { cleanCustomerData, processedItems, vatBreakdown } = processOrderDataForStornoInvoice(invoiceData);
+      
+      const doc = new PDFDocument({ 
+        size: 'A4', 
+        margin: 50,
+        bufferPages: true
+      });
+      
+      doc.font('Helvetica');
+      
+      const buffers = [];
+      doc.on('data', buffers.push.bind(buffers));
+      doc.on('end', () => {
+        const pdfData = Buffer.concat(buffers);
+        console.log('✅ STORNO PDF generation completed successfully');
+        resolve(pdfData);
+      });
+      
+      // Header with STORNO indicator
+      doc.fontSize(22)
+         .fillColor(COLORS.primary)
+         .text(COMPANY_INFO.name, 50, 50);
+      
+      doc.fontSize(18)
+         .fillColor('#C41E3A') // Red color for STORNO
+         .text(cleanTextForPDF('STORNO FAKTURA'), 400, 50, { align: 'right' });
+      
+      doc.fontSize(10)
+         .fillColor(COLORS.light)
+         .text(cleanTextForPDF('Dobropisny doklad'), 400, 75, { align: 'right' });
+      
+      // Line
+      doc.strokeColor('#C41E3A')
+         .lineWidth(2)
+         .moveTo(50, 100)
+         .lineTo(545, 100)
+         .stroke();
+      
+      // Invoice details
+      let y = 120;
+      doc.fontSize(11)
+         .fillColor(COLORS.dark)
+         .text(cleanTextForPDF('Storno faktura c.:'), 400, y)
+         .font('Helvetica-Bold')
+         .fillColor('#C41E3A')
+         .text(invoiceData.invoiceNumber, 400, y + 15);
+      
+      y += 40;
+      doc.font('Helvetica')
+         .fillColor(COLORS.dark)
+         .fontSize(10)
+         .text(cleanTextForPDF('Originalna faktura:'), 400, y)
+         .font('Helvetica-Bold')
+         .text(originalInvoiceNumber, 400, y + 12);
+      
+      y += 30;
+      doc.font('Helvetica')
+         .text(cleanTextForPDF('Datum vystavenia:'), 400, y)
+         .text(formatDate(invoiceData.createdAt), 400, y + 12)
+         .text(cleanTextForPDF('Datum stornovania:'), 400, y + 30)
+         .text(formatDate(invoiceData.createdAt), 400, y + 42);
+      
+      y += 70;
+      doc.text(cleanTextForPDF('Cislo objednavky:'), 400, y)
+         .font('Helvetica-Bold')
+         .text(`#${invoiceData.order?.orderNumber || 'N/A'}`, 400, y + 12);
+      
+      // Company info
+      y = 120;
+      doc.font('Helvetica-Bold')
+         .fillColor(COLORS.secondary)
+         .fontSize(11)
+         .text(cleanTextForPDF('Dodavatel'), 50, y);
+      
+      y += 20;
+      doc.font('Helvetica')
+         .fillColor(COLORS.dark)
+         .fontSize(10)
+         .text(COMPANY_INFO.name, 50, y)
+         .text(COMPANY_INFO.address, 50, y + 12)
+         .text(COMPANY_INFO.city, 50, y + 24)
+         .text(`ICO: ${COMPANY_INFO.ico}`, 50, y + 40)
+         .text(`DIC: ${COMPANY_INFO.dic}`, 50, y + 52)
+         .text(`IC DPH: ${COMPANY_INFO.vatNumber}`, 50, y + 64);
+      
+      // Customer info
+      y = 220;
+      doc.font('Helvetica-Bold')
+         .fillColor(COLORS.secondary)
+         .fontSize(11)
+         .text(cleanTextForPDF('Odberatel'), 50, y);
+      
+      y += 20;
+      let customerY = y;
+      doc.font('Helvetica')
+         .fillColor(COLORS.dark)
+         .fontSize(10)
+         .text(cleanCustomerData.name, 50, customerY);
+      
+      customerY += 12;
+      
+      if (cleanCustomerData.phone) {
+        doc.text(`Tel: ${cleanCustomerData.phone}`, 50, customerY);
+        customerY += 12;
+      }
+      
+      if (cleanCustomerData.email) {
+        doc.text(`Email: ${cleanCustomerData.email}`, 50, customerY);
+        customerY += 12;
+      }
+      
+      // Items table header
+      y = 300;
+      
+      doc.fontSize(10)
+         .font('Helvetica-Bold')
+         .fillColor(COLORS.dark);
+      
+      doc.rect(50, y, 495, 20)
+         .fill(COLORS.background);
+      
+      doc.fillColor(COLORS.dark)
+         .text(cleanTextForPDF('Polozka'), 55, y + 6)
+         .text('Mn.', 300, y + 6)
+         .text(cleanTextForPDF('Cena'), 350, y + 6)
+         .text(cleanTextForPDF('Spolu'), 470, y + 6);
+      
+      y += 25;
+      
+      // Render items (with NEGATIVE amounts)
+      doc.font('Helvetica').fontSize(9);
+      
+      processedItems.forEach((item, index) => {
+        if (y > 700) {
+          doc.addPage();
+          y = 50;
+        }
+        
+        doc.fillColor(COLORS.dark)
+           .text(item.name, 55, y, { width: 240 })
+           .text(item.quantity.toString(), 300, y)
+           .fillColor('#C41E3A') // Red for negative amounts
+           .text(formatCurrency(item.grossPrice), 350, y)
+           .text(formatCurrency(item.grossPrice * item.quantity), 470, y);
+        
+        if (item.description) {
+          y += 12;
+          doc.fontSize(8)
+             .fillColor(COLORS.light)
+             .text(`• ${item.description}`, 60, y, { width: 230 });
+          doc.fontSize(9);
+        }
+        
+        y += 20;
+        
+        if (index < processedItems.length - 1) {
+          doc.strokeColor('#eeeeee')
+             .lineWidth(0.5)
+             .moveTo(55, y - 5)
+             .lineTo(540, y - 5)
+             .stroke();
+        }
+      });
+      
+      // Table bottom line
+      doc.strokeColor('#C41E3A')
+         .lineWidth(1)
+         .moveTo(50, y)
+         .lineTo(545, y)
+         .stroke();
+      
+      y += 20;
+      
+      // VAT Summary (NEGATIVE amounts)
+      y = Math.max(y, 500);
+      
+      doc.rect(300, y, 245, 100)
+         .stroke(COLORS.light);
+      
+      y += 15;
+      
+      doc.fontSize(10)
+         .fillColor(COLORS.dark)
+         .text(cleanTextForPDF('Medzisucet'), 310, y)
+         .fillColor('#C41E3A')
+         .text(formatCurrency(vatBreakdown.grossAmount), 480, y, { align: 'right' });
+      
+      y += 15;
+      doc.fillColor(COLORS.dark)
+         .text(cleanTextForPDF('Zaklad DPH 19%:'), 310, y)
+         .fillColor('#C41E3A')
+         .text(formatCurrency(vatBreakdown.netAmount), 480, y, { align: 'right' });
+      
+      y += 15;
+      doc.fillColor(COLORS.dark)
+         .text('DPH 19%:', 310, y)
+         .fillColor('#C41E3A')
+         .text(formatCurrency(vatBreakdown.vatAmount), 480, y, { align: 'right' });
+      
+      y += 20;
+      doc.strokeColor('#C41E3A')
+         .lineWidth(1)
+         .moveTo(310, y)
+         .lineTo(535, y)
+         .stroke();
+      
+      y += 10;
+      doc.fontSize(12)
+         .font('Helvetica-Bold')
+         .fillColor('#C41E3A')
+         .text(cleanTextForPDF('CELKOM (STORNO):'), 310, y)
+         .text(formatCurrency(vatBreakdown.grossAmount), 480, y, { align: 'right' });
+      
+      // Footer
+      y = 650;
+      
+      doc.fontSize(10)
+         .font('Helvetica-Bold')
+         .fillColor(COLORS.secondary)
+         .text(cleanTextForPDF('Dovod stornovania:'), 50, y);
+      
+      doc.font('Helvetica')
+         .fillColor(COLORS.dark)
+         .text('Objednavka zrusena', 50, y + 15);
+      
+      y += 40;
+      doc.fontSize(8)
+         .fillColor(COLORS.light)
+         .text('Tato storno faktura zrusuje povodnu fakturu.', 50, y)
+         .text('Palace Cafe & Street Food - Autenticke chute od 2021', 50, y + 12);
+      
+      doc.end();
+      
+    } catch (error) {
+      console.error('❌ STORNO PDF generation error:', error);
+      reject(error);
+    }
+  });
+}
+
 module.exports = {
   generateInvoicePDF,
+  generateStornoInvoicePDF,
   generateInvoiceNumber,
   getNextInvoiceCounter,
+  generateStornoInvoiceNumber,
   calculateVATBreakdown,
   formatCurrency,
   processOrderDataForInvoice, // Export the new processing function
+  processOrderDataForStornoInvoice,
   cleanTextForPDF, // Export cleaning function
   COMPANY_INFO
 };

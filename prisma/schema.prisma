@@ -370,11 +370,22 @@ enum AdminRole {
   DELIVERY_USER
 }
 
+enum InvoiceType {
+  NORMAL
+  STORNO
+}
+
 // Invoice records for Slovak legal compliance
 model Invoice {
   id              Int           @id @default(autoincrement())
   invoiceNumber   String        @unique
   orderId         Int           @unique
+
+  // Invoice type and storno tracking
+  invoiceType       InvoiceType   @default(NORMAL)
+  originalInvoiceId Int?          // References original invoice for STORNO
+  isCancelled       Boolean       @default(false)
+  cancelledAt       DateTime?
   
   // Customer information
   customerName    String
@@ -386,7 +397,7 @@ model Invoice {
   deliveryFee     Float         @default(0.00)
   packagingFee    Float         @default(0)
   totalNet        Float         // Total without VAT
-  vatAmount       Float         // 20% VAT amount
+  vatAmount       Float         // 19% VAT amount
   totalGross      Float         // Final total with VAT
   
   // Payment information
@@ -405,7 +416,9 @@ model Invoice {
   updatedAt       DateTime      @updatedAt
   
   // Relations
-  order           Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order             Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  originalInvoice   Invoice?      @relation("InvoiceStorno", fields: [originalInvoiceId], references: [id])
+  stornoInvoices    Invoice[]     @relation("InvoiceStorno")
   
   @@map("invoices")
 }
