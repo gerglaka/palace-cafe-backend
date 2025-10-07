@@ -2391,215 +2391,27 @@ app.get('/api/admin/dashboard/stats', authenticateAdmin, asyncHandler(async (req
 app.put('/api/admin/orders/:id/cancel', authenticateAdmin, asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  console.log(`🚫 Cancelling order ${id} and generating Storno invoice...`);
 
-  try {
-    // Step 1: Get the order with all relations
-    const order = await prisma.order.findUnique({
-      where: { id: parseInt(id) },
-      include: {
-        items: {
-          include: {
-            menuItem: {
-              include: {
-                translations: true
-              }
-            }
-          }
-        },
-        invoice: true // Get existing invoice
-      }
-    });
-
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        error: 'Order not found'
-      });
+  const updatedOrder = await prisma.order.update({
+    where: { id: parseInt(id) },
+    data: {
+      status: 'CANCELLED'
     }
+  });
 
-    // Step 2: Check if order already has an invoice
-    if (!order.invoice) {
-      console.log('⚠️ Order has no invoice yet, cannot create Storno');
-      
-      // Just cancel the order without Storno
-      const updatedOrder = await prisma.order.update({
-        where: { id: parseInt(id) },
-        data: { status: 'CANCELLED' }
-      });
+  io.emit('orderStatusUpdate', {
+    id: updatedOrder.id,
+    orderNumber: updatedOrder.orderNumber,
+    status: updatedOrder.status
+  });
 
-      // Emit cancellation
-      io.emit('orderStatusUpdate', {
-        id: updatedOrder.id,
-        orderNumber: updatedOrder.orderNumber,
-        status: updatedOrder.status
-      });
+  console.log('📡 WebSocket emitted: orderStatusUpdate for', updatedOrder.orderNumber);
 
-      return res.json({
-        success: true,
-        message: 'Order cancelled (no invoice to storno)',
-        data: updatedOrder
-      });
-    }
+  res.json({
+    success: true,
+    data: updatedOrder
+  });
 
-    // Step 3: Get the original invoice
-    const originalInvoice = order.invoice;
-
-    console.log(`📄 Original invoice found: ${originalInvoice.invoiceNumber}`);
-
-    // Step 4: Check if already cancelled
-    if (originalInvoice.isCancelled) {
-      return res.status(400).json({
-        success: false,
-        error: 'Order already has a Storno invoice'
-      });
-    }
-
-    // Step 5: Generate Storno invoice number (same sequence as normal invoices)
-    const currentYear = new Date().getFullYear();
-    const stornoInvoiceNumber = await generateStornoInvoiceNumber(
-      order.paymentMethod,
-      currentYear,
-      prisma
-    );
-
-    console.log(`📋 Generated Storno invoice number: ${stornoInvoiceNumber}`);
-
-    // Step 6: Prepare Storno invoice data (negative amounts)
-    const stornoInvoiceData = {
-      invoiceNumber: stornoInvoiceNumber,
-      orderId: order.id,
-      invoiceType: 'STORNO',
-      originalInvoiceId: originalInvoice.id,
-      customerName: order.customerName,
-      customerEmail: order.customerEmail,
-      customerPhone: order.customerPhone,
-      subtotal: -Math.abs(originalInvoice.subtotal),
-      deliveryFee: -Math.abs(originalInvoice.deliveryFee),
-      packagingFee: -Math.abs(originalInvoice.packagingFee),
-      totalNet: -Math.abs(originalInvoice.totalNet),
-      vatAmount: -Math.abs(originalInvoice.vatAmount),
-      totalGross: -Math.abs(originalInvoice.totalGross),
-      paymentMethod: order.paymentMethod,
-      orderItems: originalInvoice.orderItems, // Same items as original
-      emailSent: false,
-      createdAt: new Date(),
-      order: {
-        orderNumber: order.orderNumber,
-        orderType: order.orderType
-      }
-    };
-
-    // Step 7: Generate Storno PDF
-    console.log('📄 Generating Storno PDF...');
-    const stornoPdfBuffer = await generateStornoInvoicePDF(
-      stornoInvoiceData,
-      originalInvoice.invoiceNumber
-    );
-
-    // Step 8: Create Storno invoice in database
-    const stornoInvoice = await prisma.invoice.create({
-      data: {
-        invoiceNumber: stornoInvoiceNumber,
-        orderId: order.id,
-        invoiceType: 'STORNO',
-        originalInvoiceId: originalInvoice.id,
-        customerName: order.customerName,
-        customerEmail: order.customerEmail,
-        customerPhone: order.customerPhone,
-        subtotal: stornoInvoiceData.subtotal,
-        deliveryFee: stornoInvoiceData.deliveryFee,
-        packagingFee: stornoInvoiceData.packagingFee,
-        totalNet: stornoInvoiceData.totalNet,
-        vatAmount: stornoInvoiceData.vatAmount,
-        totalGross: stornoInvoiceData.totalGross,
-        paymentMethod: order.paymentMethod,
-        orderItems: originalInvoice.orderItems,
-        emailSent: false
-      }
-    });
-
-    console.log(`✅ Storno invoice created in database: ${stornoInvoice.id}`);
-
-    // Step 9: Mark original invoice as cancelled
-    await prisma.invoice.update({
-      where: { id: originalInvoice.id },
-      data: {
-        isCancelled: true,
-        cancelledAt: new Date()
-      }
-    });
-
-    console.log(`✅ Original invoice ${originalInvoice.invoiceNumber} marked as cancelled`);
-
-    // Step 10: Update order status to CANCELLED
-    const updatedOrder = await prisma.order.update({
-      where: { id: parseInt(id) },
-      data: { status: 'CANCELLED' }
-    });
-
-    console.log(`✅ Order ${order.orderNumber} status updated to CANCELLED`);
-
-    // Step 11: Send Storno email to customer
-    if (order.customerEmail) {
-      console.log(`📧 Sending Storno email to ${order.customerEmail}...`);
-      
-      const emailResult = await sendStornoInvoiceEmail(
-        stornoInvoiceData,
-        originalInvoice,
-        stornoPdfBuffer,
-        order.customerEmail
-      );
-
-      if (emailResult.success) {
-        // Update email sent status
-        await prisma.invoice.update({
-          where: { id: stornoInvoice.id },
-          data: {
-            emailSent: true,
-            emailSentAt: new Date(),
-            emailAttempts: 1
-          }
-        });
-        console.log(`✅ Storno email sent successfully`);
-      } else {
-        console.log(`⚠️ Failed to send Storno email: ${emailResult.error}`);
-      }
-    }
-
-    // Step 12: Emit WebSocket event
-    io.emit('orderCancelled', {
-      id: updatedOrder.id,
-      orderNumber: updatedOrder.orderNumber,
-      status: 'CANCELLED',
-      stornoInvoiceNumber: stornoInvoiceNumber,
-      originalInvoiceNumber: originalInvoice.invoiceNumber
-    });
-
-    console.log(`✅ Order cancellation complete with Storno invoice`);
-
-    // Step 13: Return success response
-    res.json({
-      success: true,
-      message: 'Order cancelled and Storno invoice generated',
-      data: {
-        order: updatedOrder,
-        stornoInvoice: {
-          id: stornoInvoice.id,
-          invoiceNumber: stornoInvoice.invoiceNumber,
-          originalInvoiceNumber: originalInvoice.invoiceNumber,
-          totalGross: stornoInvoice.totalGross
-        }
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ Error cancelling order and generating Storno:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to cancel order'
-    });
-  }
 }));
 
 // Generate Storno invoice manually for already cancelled order
