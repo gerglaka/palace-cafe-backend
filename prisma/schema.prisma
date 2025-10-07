@@ -383,6 +383,7 @@ model Invoice {
   // Financial breakdown (Slovak VAT requirements)
   subtotal        Float         // Total before delivery and VAT
   deliveryFee     Float         @default(0.00)
+  packagingFee    Float         @default(0)
   totalNet        Float         // Total without VAT
   vatAmount       Float         // 20% VAT amount
   totalGross      Float         // Final total with VAT
