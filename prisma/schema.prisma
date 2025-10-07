@@ -379,7 +379,7 @@ enum InvoiceType {
 model Invoice {
   id              Int           @id @default(autoincrement())
   invoiceNumber   String        @unique
-  orderId         Int           @unique
+  orderId         Int           
 
   // Invoice type and storno tracking
   invoiceType       InvoiceType   @default(NORMAL)
