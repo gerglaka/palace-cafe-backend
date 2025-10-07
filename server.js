@@ -393,7 +393,6 @@ app.post('/api/orders', orderLimiter, asyncHandler(async (req, res) => {
   try {
     // Get restaurant settings for delivery fee
     const restaurant = await prisma.restaurant.findFirst();
-    const packagingFee = 0.50;
     const deliveryFee = (orderType === 'DELIVERY') ? restaurant?.deliveryFee || 2.50 : 0;
 
     // Calculate totals and prepare order items
@@ -488,7 +487,37 @@ app.post('/api/orders', orderLimiter, asyncHandler(async (req, res) => {
       });
     }
 
+    // ============================================
+    // CALCULATE PACKAGING FEE (€0.50 per food item)
+    // ============================================
+    const PACKAGING_FEE_PER_ITEM = 0.50;
+    
+    // Categories that DON'T get packaging fee (non-food items)
+    const nonFoodCategories = [
+      'sides', 'nonalcoholic', 'sauces', 'coffees', 
+      'lemonades', 'specialty', 'cocktails', 'alcohol', 
+      'shots', 'desserts'
+    ];
+
+    let packagingFeeCount = 0;
+    
+    // Count food items only
+    for (const item of items) {
+      const menuItem = await prisma.menuItem.findUnique({
+        where: { id: item.menuItemId },
+        include: { category: true }
+      });
+      
+      // Only count food items (exclude drinks, sides, sauces, desserts)
+      if (menuItem && menuItem.category && !nonFoodCategories.includes(menuItem.category.slug)) {
+        packagingFeeCount += item.quantity; // Count each quantity
+      }
+    }
+    
+    const packagingFee = packagingFeeCount * PACKAGING_FEE_PER_ITEM;
     const total = subtotal + packagingFee + deliveryFee;
+    
+    console.log(`📦 Packaging: ${packagingFeeCount} food items × €${PACKAGING_FEE_PER_ITEM} = €${packagingFee.toFixed(2)}`);
 
     // Create order in database
     const order = await prisma.order.create({
@@ -505,6 +534,7 @@ app.post('/api/orders', orderLimiter, asyncHandler(async (req, res) => {
         specialNotes: specialNotes || null,
         subtotal,
         deliveryFee,
+        packagingFee,
         total,
         scheduledFor: scheduledFor ? new Date(scheduledFor) : null,
         estimatedTime: new Date(Date.now() + 45 * 60 * 1000), // 45 minutes from now
@@ -1000,6 +1030,33 @@ app.post('/api/stripe/confirm-payment', orderLimiter, asyncHandler(async (req, r
     const restaurant = await prisma.restaurant.findFirst();
     const deliveryFee = (orderType === 'DELIVERY') ? restaurant?.deliveryFee || 2.50 : 0;
 
+    // ============================================
+    // CALCULATE PACKAGING FEE (€0.50 per food item)
+    // ============================================
+    const PACKAGING_FEE_PER_ITEM = 0.50;
+    
+    const nonFoodCategories = [
+      'sides', 'nonalcoholic', 'sauces', 'coffees', 
+      'lemonades', 'specialty', 'cocktails', 'alcohol', 
+      'shots', 'desserts'
+    ];
+
+    let packagingFeeCount = 0;
+    
+    for (const item of items) {
+      const menuItem = await prisma.menuItem.findUnique({
+        where: { id: item.menuItemId },
+        include: { category: true }
+      });
+      
+      if (menuItem && menuItem.category && !nonFoodCategories.includes(menuItem.category.slug)) {
+        packagingFeeCount += item.quantity;
+      }
+    }
+    
+    const packagingFee = packagingFeeCount * PACKAGING_FEE_PER_ITEM;
+    console.log(`📦 Stripe order - Packaging: ${packagingFeeCount} items = €${packagingFee.toFixed(2)}`);
+
     // Calculate totals and prepare order items (same logic as cash orders)
     let subtotal = 0;
     const orderItems = [];
@@ -1090,7 +1147,7 @@ app.post('/api/stripe/confirm-payment', orderLimiter, asyncHandler(async (req, r
       });
     }
 
-    const total = subtotal + deliveryFee;
+    const total = subtotal + deliveryFee + packagingFee;
 
     // Verify payment amount matches order total
     const paidAmount = paymentIntent.amount / 100; // Convert cents to euros
@@ -1118,6 +1175,7 @@ app.post('/api/stripe/confirm-payment', orderLimiter, asyncHandler(async (req, r
         specialNotes: specialNotes || null,
         subtotal,
         deliveryFee,
+        packagingFee,
         total,
         scheduledFor: scheduledFor ? new Date(scheduledFor) : null,
         estimatedTime: new Date(Date.now() + 30 * 60 * 1000), // 30 minutes for card orders
