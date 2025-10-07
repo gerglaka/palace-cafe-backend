@@ -233,6 +233,7 @@ model Order {
   // Pricing
   subtotal          Float
   deliveryFee       Float             @default(0.00)
+  packagingFee      Float             @default(0.00)
   discount          Float             @default(0.00)
   total             Float
   
