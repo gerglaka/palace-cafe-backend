@@ -257,7 +257,7 @@ model Order {
   address           CustomerAddress?  @relation(fields: [addressId], references: [id])
   items             OrderItem[]
   payments          Payment[]
-  invoice           Invoice?
+  invoices           Invoice[]
   
   @@map("orders")
 }
@@ -416,7 +416,7 @@ model Invoice {
   updatedAt       DateTime      @updatedAt
   
   // Relations
-  order             Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order                 Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
   originalInvoice   Invoice?      @relation("InvoiceStorno", fields: [originalInvoiceId], references: [id])
   stornoInvoices    Invoice[]     @relation("InvoiceStorno")
   
