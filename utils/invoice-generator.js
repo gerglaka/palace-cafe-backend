@@ -221,53 +221,30 @@ function processOrderDataForInvoice(invoiceData) {
   });
   
   // ============================================
-  // CALCULATE PACKAGING FEE DYNAMICALLY (€0.50 per food item)
+  // ADD PACKAGING FEE FROM INVOICE DATA (already calculated and stored)
   // ============================================
-  const PACKAGING_FEE_PER_ITEM = 0.50;
   
-  // Categories that DON'T get packaging fee (non-food items)
-  const nonFoodCategories = [
-    'sides', 'nonalcoholic', 'sauces', 'coffees', 
-    'lemonades', 'specialty', 'cocktails', 'alcohol', 
-    'shots', 'desserts', 'dorucenie' // Also exclude delivery
-  ];
+  // Get packaging fee from invoice data (already calculated when order was created)
+  const packagingFeeFromInvoice = invoiceData.packagingFee || 0;
   
-  // Count food items from processed items
-  let packagingFeeCount = 0;
-  
-  processedItems.forEach(item => {
-    // Convert item name to slug-like format for comparison
-    const itemSlug = item.name.toLowerCase()
-      .replace(/\s+/g, '-')
-      .replace(/[^a-z0-9-]/g, '');
-    
-    // Check if it's a food item (not in excluded categories)
-    const isNonFood = nonFoodCategories.some(category => 
-      itemSlug.includes(category) || 
-      item.name.toLowerCase().includes(category)
-    );
-    
-    if (!isNonFood) {
-      packagingFeeCount += item.quantity;
-    }
-  });
-  
-  // Only add packaging fee if there are food items
-  if (packagingFeeCount > 0) {
-    const totalPackagingFee = packagingFeeCount * PACKAGING_FEE_PER_ITEM;
+  if (packagingFeeFromInvoice > 0) {
+    // Calculate number of items for display (€0.50 per item)
+    const PACKAGING_FEE_PER_ITEM = 0.50;
+    const packagingFeeCount = Math.round(packagingFeeFromInvoice / PACKAGING_FEE_PER_ITEM);
     
     const packagingItem = {
       name: 'Csomagolas',
       description: `Balenie (${packagingFeeCount}x)`,
       quantity: 1,
-      grossPrice: totalPackagingFee
+      grossPrice: packagingFeeFromInvoice
     };
     
     processedItems.push(packagingItem);
-    console.log(`✅ Added packaging fee: ${packagingFeeCount} items = €${totalPackagingFee.toFixed(2)}`);
+    console.log(`✅ Added packaging fee from invoice: €${packagingFeeFromInvoice.toFixed(2)}`);
   } else {
-    console.log('ℹ️ No packaging fee - no food items in order');
+    console.log('ℹ️ No packaging fee in invoice');
   }
+  // ============================================
   
   
   // STEP 3: Check if delivery order and add delivery fee

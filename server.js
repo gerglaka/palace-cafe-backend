@@ -569,7 +569,8 @@ app.post('/api/orders', orderLimiter, asyncHandler(async (req, res) => {
       const invoiceNumber = generateInvoiceNumber(paymentMethod || 'CASH', currentYear, invoiceCounter);
       
       // Calculate VAT breakdown
-      const vatBreakdown = calculateVATBreakdown(total);
+      const totalWithPackaging = subtotal + deliveryFee + packagingFee;
+      const vatBreakdown = calculateVATBreakdown(totalWithPackaging);
       
       // Create invoice record
       const invoice = await prisma.invoice.create({
@@ -581,6 +582,7 @@ app.post('/api/orders', orderLimiter, asyncHandler(async (req, res) => {
           customerPhone,
           subtotal,
           deliveryFee,
+          packagingFee,
           totalNet: vatBreakdown.netAmount,
           vatAmount: vatBreakdown.vatAmount,
           totalGross: vatBreakdown.grossAmount,
@@ -1225,7 +1227,8 @@ app.post('/api/stripe/confirm-payment', orderLimiter, asyncHandler(async (req, r
         const currentYear = new Date().getFullYear();
         const invoiceCounter = await getNextInvoiceCounter('CARD', currentYear, prisma);
         const invoiceNumber = generateInvoiceNumber('CARD', currentYear, invoiceCounter);
-        const vatBreakdown = calculateVATBreakdown(total);
+        const totalWithPackaging = subtotal + deliveryFee + packagingFee;
+        const vatBreakdown = calculateVATBreakdown(totalWithPackaging);
         
         const invoice = await prisma.invoice.create({
           data: {
@@ -1236,6 +1239,7 @@ app.post('/api/stripe/confirm-payment', orderLimiter, asyncHandler(async (req, r
             customerPhone,
             subtotal,
             deliveryFee,
+            packagingFee,
             totalNet: vatBreakdown.netAmount,
             vatAmount: vatBreakdown.vatAmount,
             totalGross: vatBreakdown.grossAmount,
@@ -4452,7 +4456,7 @@ app.get('/api/admin/invoices/:id', authenticateAdmin, requireRole(['SUPER_ADMIN'
       orderType: invoice.orderType || invoice.order?.orderType,
       subtotal: invoice.order?.subtotal || 0,
       deliveryFee: invoice.order?.deliveryFee || 0,
-      packagingFee: invoice.packagingFee || invoice.order?.packagingFee || 0,
+      packagingFee: invoice.packagingFee || 0,
       totalNet: invoice.totalNet,
       totalVat: invoice.vatAmount,
       totalGross: invoice.totalGross,
@@ -4804,6 +4808,9 @@ app.get('/api/admin/invoices/export/monthly', authenticateAdmin, requireRole(['S
         'Order Number',
         'Payment Method',
         'Order Type',
+        'Subtotal',        
+        'Delivery Fee',    
+        'Packaging Fee',        
         'Net Amount',
         'VAT Amount',
         'Gross Amount'
@@ -4815,6 +4822,9 @@ app.get('/api/admin/invoices/export/monthly', authenticateAdmin, requireRole(['S
         invoice.order?.orderNumber || '',
         invoice.paymentMethod,
         invoice.orderType || invoice.order?.orderType || '',
+        invoice.subtotal,        
+        invoice.deliveryFee,     
+        invoice.packagingFee,    
         invoice.totalNet,
         invoice.vatAmount,
         invoice.totalGross
