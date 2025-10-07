@@ -220,15 +220,55 @@ function processOrderDataForInvoice(invoiceData) {
     console.log('✅ Processed item:', processedItem);
   });
   
-  const packagingItem = {
-    name: 'Csomagolas',
-    description: 'Balenie',
-    quantity: 1,
-    grossPrice: 0.50
-  };
+  // ============================================
+  // CALCULATE PACKAGING FEE DYNAMICALLY (€0.50 per food item)
+  // ============================================
+  const PACKAGING_FEE_PER_ITEM = 0.50;
   
-  processedItems.push(packagingItem);
-  console.log('✅ Added packaging fee:', packagingItem);
+  // Categories that DON'T get packaging fee (non-food items)
+  const nonFoodCategories = [
+    'sides', 'nonalcoholic', 'sauces', 'coffees', 
+    'lemonades', 'specialty', 'cocktails', 'alcohol', 
+    'shots', 'desserts', 'dorucenie' // Also exclude delivery
+  ];
+  
+  // Count food items from processed items
+  let packagingFeeCount = 0;
+  
+  processedItems.forEach(item => {
+    // Convert item name to slug-like format for comparison
+    const itemSlug = item.name.toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9-]/g, '');
+    
+    // Check if it's a food item (not in excluded categories)
+    const isNonFood = nonFoodCategories.some(category => 
+      itemSlug.includes(category) || 
+      item.name.toLowerCase().includes(category)
+    );
+    
+    if (!isNonFood) {
+      packagingFeeCount += item.quantity;
+    }
+  });
+  
+  // Only add packaging fee if there are food items
+  if (packagingFeeCount > 0) {
+    const totalPackagingFee = packagingFeeCount * PACKAGING_FEE_PER_ITEM;
+    
+    const packagingItem = {
+      name: 'Csomagolas',
+      description: `Balenie (${packagingFeeCount}x)`,
+      quantity: 1,
+      grossPrice: totalPackagingFee
+    };
+    
+    processedItems.push(packagingItem);
+    console.log(`✅ Added packaging fee: ${packagingFeeCount} items = €${totalPackagingFee.toFixed(2)}`);
+  } else {
+    console.log('ℹ️ No packaging fee - no food items in order');
+  }
+  
   
   // STEP 3: Check if delivery order and add delivery fee
   if (invoiceData.order?.orderType?.trim().toUpperCase() === 'DELIVERY') {
