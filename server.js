@@ -1219,46 +1219,77 @@ app.post('/api/stripe/confirm-payment', orderLimiter, asyncHandler(async (req, r
 
     console.log(`✅ Order created: ${order.orderNumber}`);
 
+        // Generate invoice in background (same as cash orders)
     // Generate invoice in background (same as cash orders)
     setImmediate(async () => {
-      try {
-        console.log('📄 Generating invoice for card payment...');
-        
-        const currentYear = new Date().getFullYear();
-        const invoiceCounter = await getNextInvoiceCounter('CARD', currentYear, prisma);
-        const invoiceNumber = generateInvoiceNumber('CARD', currentYear, invoiceCounter);
-        const totalWithPackaging = subtotal + deliveryFee + packagingFee;
-        const vatBreakdown = calculateVATBreakdown(totalWithPackaging);
-        
-        const invoice = await prisma.invoice.create({
-          data: {
-            invoiceNumber,
-            orderId: order.id,
-            customerName,
-            customerEmail,
-            customerPhone,
-            subtotal,
-            deliveryFee,
-            packagingFee,
-            totalNet: vatBreakdown.netAmount,
-            vatAmount: vatBreakdown.vatAmount,
-            totalGross: vatBreakdown.grossAmount,
-            paymentMethod: 'CARD',
-            orderItems: invoiceItems,
-            emailSent: false
-          },
-          include: { order: true }
-        });
-
-        console.log(`📋 Invoice created: ${invoiceNumber}`);
-
-        // Generate and send invoice (when email is re-enabled)
-        // const pdfBuffer = await generateInvoicePDF({ ...invoice, orderItems: invoiceItems });
-        // await sendInvoiceEmail(invoice, pdfBuffer, customerEmail);
-
-      } catch (invoiceError) {
-        console.error('❌ Invoice generation failed for card payment:', invoiceError);
-      }
+        try {
+            console.log('📄 Generating invoice for card payment...');
+            
+            const currentYear = new Date().getFullYear();
+            const invoiceCounter = await getNextInvoiceCounter('CARD', currentYear, prisma);
+            const invoiceNumber = generateInvoiceNumber('CARD', currentYear, invoiceCounter);
+            const totalWithPackaging = subtotal + deliveryFee + packagingFee;
+            const vatBreakdown = calculateVATBreakdown(totalWithPackaging);
+            
+            const invoice = await prisma.invoice.create({
+                data: {
+                    invoiceNumber,
+                    orderId: order.id,
+                    customerName,
+                    customerEmail,
+                    customerPhone,
+                    subtotal,
+                    deliveryFee,
+                    packagingFee,
+                    totalNet: vatBreakdown.netAmount,
+                    vatAmount: vatBreakdown.vatAmount,
+                    totalGross: vatBreakdown.grossAmount,
+                    paymentMethod: 'CARD',
+                    orderItems: invoiceItems,
+                    emailSent: false
+                },
+                include: { order: true }
+            });
+          
+            console.log(`📋 Invoice created: ${invoiceNumber}`);
+          
+            // ✅ GENERATE AND SEND EMAIL (UNCOMMENTED)
+            if (customerEmail) {
+                try {
+                    const pdfBuffer = await generateInvoicePDF({ 
+                        ...invoice, 
+                        orderItems: invoiceItems 
+                    });
+                    
+                    const emailResult = await sendInvoiceEmail(invoice, pdfBuffer, customerEmail);
+                    
+                    if (emailResult.success) {
+                        await prisma.invoice.update({
+                            where: { id: invoice.id },
+                            data: {
+                                emailSent: true,
+                                emailSentAt: new Date(),
+                                emailAttempts: 1
+                            }
+                        });
+                        console.log(`✅ Invoice email sent to ${customerEmail}`);
+                    } else {
+                        console.log(`⚠️ Failed to send invoice email: ${emailResult.error}`);
+                    }
+                } catch (emailError) {
+                    console.error('❌ Email sending error:', emailError);
+                    await prisma.invoice.update({
+                        where: { id: invoice.id },
+                        data: { emailAttempts: 1 }
+                    });
+                }
+            } else {
+                console.log('📧 No customer email provided, skipping invoice email');
+            }
+          
+        } catch (invoiceError) {
+            console.error('❌ Invoice generation failed for card payment:', invoiceError);
+        }
     });
 
     // Emit WebSocket event for admin dashboard
