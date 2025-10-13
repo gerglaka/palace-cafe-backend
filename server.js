@@ -4571,7 +4571,7 @@ app.get('/api/admin/invoices/:id', authenticateAdmin, requireRole(['SUPER_ADMIN'
 }));
 
 // Download invoice PDF
-app.get('/api/admin/invoices/:id/pdf', authenticateAdmin, requireRole(['SUPER_ADMIN']), asyncHandler(async (req, res) => {
+app.get('/api/admin/invoices/:id/pdf', authenticateAdmin, asyncHandler(async (req, res) => {
   const { id } = req.params;
   console.log(`📄 Generating PDF for invoice ID: ${id}`);
   
@@ -4592,11 +4592,11 @@ app.get('/api/admin/invoices/:id/pdf', authenticateAdmin, requireRole(['SUPER_AD
                 }
               }
             }
-          },
-          originalInvoice: {
-            select: {
-              invoiceNumber: true
-            }
+          }
+        },
+        originalInvoice: {  // ✅ CORRECT - originalInvoice is on Invoice, not Order
+          select: {
+            invoiceNumber: true
           }
         }
       }
@@ -4617,7 +4617,7 @@ app.get('/api/admin/invoices/:id/pdf', authenticateAdmin, requireRole(['SUPER_AD
     if (invoice.invoiceType === 'STORNO') {
       pdfBuffer = await generateStornoInvoicePDF(
         { ...invoice, orderItems: invoice.orderItems },
-        invoice.originalInvoice.invoiceNumber
+        invoice.originalInvoice?.invoiceNumber || 'N/A'  // ✅ Use optional chaining
       );
     } else {
       pdfBuffer = await generateInvoicePDF({
