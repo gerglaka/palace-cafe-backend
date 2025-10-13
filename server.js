@@ -2558,7 +2558,7 @@ app.put('/api/admin/orders/:id/cancel', authenticateAdmin, asyncHandler(async (r
 
           // ✅ Send cancellation email with Storno invoice
           const emailResult = await sendStornoInvoiceEmail(
-            stornoInvoiceData,
+            stornoInvoice,
             originalInvoice,
             stornoPdfBuffer,
             order.customerEmail
