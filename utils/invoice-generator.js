@@ -632,14 +632,18 @@ function generateStornoInvoicePDF(invoiceData, originalInvoiceNumber) {
       doc.fontSize(22)
          .fillColor(COLORS.primary)
          .text(COMPANY_INFO.name, 50, 50);
-      
-      doc.fontSize(18)
-         .fillColor('#C41E3A') // Red color for STORNO
+          
+      // STORNO FAKTURA - Bold and red
+      doc.fontSize(15)
+         .font('Helvetica-Bold')
+         .fillColor('#C41E3A')
          .text(cleanTextForPDF('STORNO FAKTURA'), 400, 50, { align: 'right' });
-      
-      doc.fontSize(10)
+          
+      // Subtitle below
+      doc.fontSize(9)
+         .font('Helvetica')
          .fillColor(COLORS.light)
-         .text(cleanTextForPDF('Dobropisny doklad'), 400, 75, { align: 'right' });
+         .text(cleanTextForPDF('Dobropisny doklad'), 400, 68, { align: 'right' });
       
       // Line
       doc.strokeColor('#C41E3A')
@@ -669,7 +673,7 @@ function generateStornoInvoicePDF(invoiceData, originalInvoiceNumber) {
       doc.font('Helvetica')
          .text(cleanTextForPDF('Datum vystavenia:'), 400, y)
          .text(formatDate(invoiceData.createdAt), 400, y + 12)
-         .text(cleanTextForPDF('Datum stornovania:'), 400, y + 30)
+         .text(cleanTextForPDF('Datum dodanie:'), 400, y + 30)
          .text(formatDate(invoiceData.createdAt), 400, y + 42);
       
       y += 70;
