@@ -5467,7 +5467,7 @@ app.post('/api/admin/orders/:id/generate-storno', authenticateAdmin, asyncHandle
       console.log('Step 8: Sending email...');
       try {
         const emailResult = await sendStornoInvoiceEmail(
-          stornoInvoiceData,
+          stornoInvoice,
           originalInvoice,
           stornoPdfBuffer,
           order.customerEmail
