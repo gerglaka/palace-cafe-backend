@@ -5153,6 +5153,8 @@ app.post('/api/admin/orders/:id/generate-storno', authenticateAdmin, asyncHandle
   console.log(`📋 Manually generating Storno invoice for order ${id}...`);
 
   try {
+    // Step 1: Get the order with invoices (plural!)
+    console.log('Step 1: Fetching order...');
     const order = await prisma.order.findUnique({
       where: { id: parseInt(id) },
       include: {
@@ -5165,21 +5167,33 @@ app.post('/api/admin/orders/:id/generate-storno', authenticateAdmin, asyncHandle
             }
           }
         },
-        invoice: true
+        invoices: true  // ✅ Changed to plural
       }
     });
 
     if (!order) {
+      console.log('❌ Order not found');
       return res.status(404).json({ success: false, error: 'Order not found' });
     }
+    console.log('✅ Order found:', order.orderNumber);
 
-    if (!order.invoice) {
+    // Check if order has any invoices
+    if (!order.invoices || order.invoices.length === 0) {
+      console.log('❌ Order has no invoices');
       return res.status(400).json({ success: false, error: 'Order has no invoice' });
     }
 
-    const originalInvoice = order.invoice;
+    // Get the NORMAL invoice (not a Storno)
+    const originalInvoice = order.invoices.find(inv => inv.invoiceType !== 'STORNO');
+    
+    if (!originalInvoice) {
+      console.log('❌ No normal invoice found');
+      return res.status(400).json({ success: false, error: 'Order has no normal invoice' });
+    }
+    console.log('✅ Original invoice found:', originalInvoice.invoiceNumber);
 
-    // Check if already has Storno
+    // Step 2: Check for existing Storno
+    console.log('Step 2: Checking for existing Storno...');
     const existingStorno = await prisma.invoice.findFirst({
       where: {
         originalInvoiceId: originalInvoice.id,
@@ -5188,21 +5202,27 @@ app.post('/api/admin/orders/:id/generate-storno', authenticateAdmin, asyncHandle
     });
 
     if (existingStorno) {
+      console.log('❌ Storno already exists:', existingStorno.invoiceNumber);
       return res.status(400).json({
         success: false,
         error: 'Storno invoice already exists',
         data: existingStorno
       });
     }
+    console.log('✅ No existing Storno found');
 
-    // Generate Storno
+    // Step 3: Generate Storno invoice number
+    console.log('Step 3: Generating Storno invoice number...');
     const currentYear = new Date().getFullYear();
     const stornoInvoiceNumber = await generateStornoInvoiceNumber(
       order.paymentMethod,
       currentYear,
       prisma
     );
+    console.log('✅ Storno invoice number:', stornoInvoiceNumber);
 
+    // Step 4: Prepare Storno data
+    console.log('Step 4: Preparing Storno data...');
     const stornoInvoiceData = {
       invoiceNumber: stornoInvoiceNumber,
       orderId: order.id,
@@ -5224,14 +5244,18 @@ app.post('/api/admin/orders/:id/generate-storno', authenticateAdmin, asyncHandle
         orderType: order.orderType
       }
     };
+    console.log('✅ Storno data prepared');
 
-    // Generate PDF
+    // Step 5: Generate PDF
+    console.log('Step 5: Generating PDF...');
     const stornoPdfBuffer = await generateStornoInvoicePDF(
       stornoInvoiceData,
       originalInvoice.invoiceNumber
     );
+    console.log('✅ PDF generated');
 
-    // Create in database
+    // Step 6: Create in database
+    console.log('Step 6: Creating Storno invoice in database...');
     const stornoInvoice = await prisma.invoice.create({
       data: {
         invoiceNumber: stornoInvoiceNumber,
@@ -5252,8 +5276,10 @@ app.post('/api/admin/orders/:id/generate-storno', authenticateAdmin, asyncHandle
         emailSent: false
       }
     });
+    console.log('✅ Storno invoice created in DB:', stornoInvoice.id);
 
-    // Mark original as cancelled
+    // Step 7: Mark original as cancelled
+    console.log('Step 7: Marking original invoice as cancelled...');
     await prisma.invoice.update({
       where: { id: originalInvoice.id },
       data: {
@@ -5261,29 +5287,40 @@ app.post('/api/admin/orders/:id/generate-storno', authenticateAdmin, asyncHandle
         cancelledAt: new Date()
       }
     });
+    console.log('✅ Original invoice marked as cancelled');
 
-    // Send email
+    // Step 8: Send email (optional)
     if (order.customerEmail) {
-      const emailResult = await sendStornoInvoiceEmail(
-        stornoInvoiceData,
-        originalInvoice,
-        stornoPdfBuffer,
-        order.customerEmail
-      );
+      console.log('Step 8: Sending email...');
+      try {
+        const emailResult = await sendStornoInvoiceEmail(
+          stornoInvoiceData,
+          originalInvoice,
+          stornoPdfBuffer,
+          order.customerEmail
+        );
 
-      if (emailResult.success) {
-        await prisma.invoice.update({
-          where: { id: stornoInvoice.id },
-          data: {
-            emailSent: true,
-            emailSentAt: new Date(),
-            emailAttempts: 1
-          }
-        });
+        if (emailResult.success) {
+          await prisma.invoice.update({
+            where: { id: stornoInvoice.id },
+            data: {
+              emailSent: true,
+              emailSentAt: new Date(),
+              emailAttempts: 1
+            }
+          });
+          console.log('✅ Email sent successfully');
+        } else {
+          console.log('⚠️ Email sending failed:', emailResult.error);
+        }
+      } catch (emailError) {
+        console.log('⚠️ Email error (non-critical):', emailError.message);
       }
+    } else {
+      console.log('ℹ️ No customer email, skipping email');
     }
 
-    console.log(`✅ Storno invoice generated manually: ${stornoInvoiceNumber}`);
+    console.log(`✅ Storno invoice generated successfully: ${stornoInvoiceNumber}`);
 
     res.json({
       success: true,
@@ -5300,7 +5337,12 @@ app.post('/api/admin/orders/:id/generate-storno', authenticateAdmin, asyncHandle
 
   } catch (error) {
     console.error('❌ Error generating manual Storno:', error);
-    res.status(500).json({ success: false, error: error.message || 'Failed to generate Storno invoice' });
+    console.error('Error message:', error.message);
+    
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Failed to generate Storno invoice'
+    });
   }
 }));
 
