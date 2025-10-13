@@ -4175,7 +4175,8 @@ app.patch('/api/admin/menu/items/:id/restore', authenticateAdmin, asyncHandler(a
 // ============================================
 
 // Get invoice overview statistics
-app.get('/api/admin/invoices/overview', authenticateAdmin, requireRole(['SUPER_ADMIN']), asyncHandler(async (req, res) => {
+// Get invoice overview statistics
+app.get('/api/admin/invoices/overview', authenticateAdmin, asyncHandler(async (req, res) => {
   console.log('📊 Loading invoice overview statistics...');
   
   try {
@@ -4183,12 +4184,21 @@ app.get('/api/admin/invoices/overview', authenticateAdmin, requireRole(['SUPER_A
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    // Today's statistics
+    // Common filter: Exclude Storno invoices AND cancelled invoices
+    const validInvoiceFilter = {
+      invoiceType: {
+        not: 'STORNO'  // Exclude Storno invoices
+      },
+      isCancelled: false  // Exclude cancelled invoices
+    };
+
+    // Today's statistics (valid invoices only)
     const todayStats = await prisma.invoice.aggregate({
       where: {
         createdAt: {
           gte: startOfDay
-        }
+        },
+        ...validInvoiceFilter
       },
       _sum: {
         totalGross: true
@@ -4196,12 +4206,13 @@ app.get('/api/admin/invoices/overview', authenticateAdmin, requireRole(['SUPER_A
       _count: true
     });
 
-    // Monthly statistics
+    // Monthly statistics (valid invoices only)
     const monthlyStats = await prisma.invoice.aggregate({
       where: {
         createdAt: {
           gte: startOfMonth
-        }
+        },
+        ...validInvoiceFilter
       },
       _sum: {
         totalGross: true
@@ -4209,13 +4220,14 @@ app.get('/api/admin/invoices/overview', authenticateAdmin, requireRole(['SUPER_A
       _count: true
     });
 
-    // Payment method breakdown for current month
+    // Payment method breakdown for current month (valid invoices only)
     const paymentBreakdown = await prisma.invoice.groupBy({
       by: ['paymentMethod'],
       where: {
         createdAt: {
           gte: startOfMonth
-        }
+        },
+        ...validInvoiceFilter
       },
       _count: true
     });
@@ -4225,7 +4237,7 @@ app.get('/api/admin/invoices/overview', authenticateAdmin, requireRole(['SUPER_A
       paymentStats[item.paymentMethod] = item._count;
     });
 
-    // ✅ NEW: Count storno invoices
+    // Count Storno invoices separately (for the red card)
     const stornoCount = await prisma.invoice.count({
       where: {
         invoiceType: 'STORNO',
@@ -4238,10 +4250,11 @@ app.get('/api/admin/invoices/overview', authenticateAdmin, requireRole(['SUPER_A
       todayRevenue: todayStats._sum.totalGross || 0,
       monthlyInvoices: monthlyStats._count || 0,
       monthlyRevenue: monthlyStats._sum.totalGross || 0,
-      paymentBreakdown: paymentStats
+      paymentBreakdown: paymentStats,
+      monthlyStornoCount: stornoCount
     };
 
-    console.log('✅ Invoice overview loaded');
+    console.log('✅ Invoice overview loaded:', overviewData);
 
     res.json({
       success: true,
