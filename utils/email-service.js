@@ -19,7 +19,7 @@ const { formatCurrency } = require('./invoice-generator');
 const SMTP_CONFIG = {
   host: process.env.SMTP_HOST || 'smtp.m1.websupport.sk',
   port: parseInt(process.env.SMTP_PORT || '465'),
-  secure: true, // Use SSL/TLS
+  secure: process.env.SMTP_PORT === '465',
   auth: {
     user: process.env.SMTP_USER || 'notifications@palacebar.sk',
     pass: process.env.SMTP_PASS // Required! Set in environment variables
@@ -63,7 +63,10 @@ function initializeSMTP() {
       },
       tls: {
         rejectUnauthorized: true // Verify SSL certificate
-      }
+      },
+      connectionTimeout: 10000, // 10 second timeout
+      greetingTimeout: 10000,
+      socketTimeout: 30000
     });
 
     isInitialized = true;
