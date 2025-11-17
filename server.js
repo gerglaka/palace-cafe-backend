@@ -4951,7 +4951,7 @@ app.get('/api/admin/invoices/monthly-report', authenticateAdmin, requireRole(['S
     // ============================================
     doc.fontSize(16)
        .fillColor(colors.accent)
-       .text('💰 Bevételi Összesítő', 50, yPosition);
+       .text('Bevételi Összesítő', 50, yPosition);
 
     yPosition += 30;
 
@@ -4985,7 +4985,7 @@ app.get('/api/admin/invoices/monthly-report', authenticateAdmin, requireRole(['S
     // ============================================
     doc.fontSize(16)
        .fillColor(colors.accent)
-       .text('📄 Számlák', 50, yPosition);
+       .text('Számlák', 50, yPosition);
 
     yPosition += 30;
 
@@ -5027,7 +5027,7 @@ app.get('/api/admin/invoices/monthly-report', authenticateAdmin, requireRole(['S
 
     doc.fontSize(16)
        .fillColor(colors.accent)
-       .text('🏆 Top 3 Termékek', 50, yPosition);
+       .text('Top 3 Termékek', 50, yPosition);
 
     yPosition += 25;
 
@@ -5044,7 +5044,7 @@ app.get('/api/admin/invoices/monthly-report', authenticateAdmin, requireRole(['S
 
     doc.fontSize(16)
        .fillColor(colors.accent)
-       .text('📉 Legkevésbé Rendelt Termékek', 50, yPosition);
+       .text('Legkevésbé Rendelt Termékek', 50, yPosition);
 
     yPosition += 25;
 
@@ -5071,7 +5071,7 @@ app.get('/api/admin/invoices/monthly-report', authenticateAdmin, requireRole(['S
 
     doc.fontSize(16)
        .fillColor(colors.accent)
-       .text('🚚 Rendelés Típusok', 50, yPosition);
+       .text('Rendelés Típusok', 50, yPosition);
 
     yPosition += 30;
 
@@ -5096,7 +5096,7 @@ app.get('/api/admin/invoices/monthly-report', authenticateAdmin, requireRole(['S
     // ============================================
     doc.fontSize(16)
        .fillColor(colors.accent)
-       .text('⏱️ Átlagos Feldolgozási Idők', 50, yPosition);
+       .text('Átlagos Feldolgozási Idők', 50, yPosition);
 
     yPosition += 30;
 
