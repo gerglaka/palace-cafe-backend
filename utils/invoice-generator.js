@@ -236,10 +236,10 @@ function processOrderDataForInvoice(invoiceData) {
   // Get packaging fee from invoice data (already calculated when order was created)
   const packagingFeeFromInvoice = invoiceData.packagingFee || 0;
   
-  if (packagingFeeFromInvoice > 0) {
+  if (packagingFeeFromInvoice !== 0) {
     // Calculate number of items for display (€0.50 per item)
     const PACKAGING_FEE_PER_ITEM = 0.50;
-    const packagingFeeCount = Math.round(packagingFeeFromInvoice / PACKAGING_FEE_PER_ITEM);
+    const packagingFeeCount = Math.round(Math.abs(packagingFeeFromInvoice) / PACKAGING_FEE_PER_ITEM);
     
     const packagingItem = {
       name: 'Csomagolas',
