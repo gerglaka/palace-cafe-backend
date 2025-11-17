@@ -295,23 +295,25 @@ function processOrderDataForInvoice(invoiceData) {
  */
 function processOrderDataForStornoInvoice(invoiceData) {
   console.log('🔄 Starting STORNO invoice data processing...');
+  console.log('📦 Packaging fee from invoice:', invoiceData.packagingFee);
+  console.log('📦 Subtotal from invoice:', invoiceData.subtotal);
+  console.log('📦 Total gross from invoice:', invoiceData.totalGross);
   
-  // Check if values are already negative (from server.js)
-  const alreadyNegative = invoiceData.packagingFee < 0 || invoiceData.subtotal < 0 || invoiceData.totalGross < 0;
+  // Create a copy of invoice data with POSITIVE values for processing
+  const positiveInvoiceData = {
+    ...invoiceData,
+    packagingFee: Math.abs(invoiceData.packagingFee || 0),
+    subtotal: Math.abs(invoiceData.subtotal || 0),
+    deliveryFee: Math.abs(invoiceData.deliveryFee || 0),
+    totalGross: Math.abs(invoiceData.totalGross || 0)
+  };
   
-  if (alreadyNegative) {
-    console.log('ℹ️ Values already negative, using as-is');
-    // Just process normally, values are already negative
-    return processOrderDataForInvoice(invoiceData);
-  }
+  // Process with positive values first
+  const processed = processOrderDataForInvoice(positiveInvoiceData);
   
-  // Values are positive, need to negate them
-  console.log('ℹ️ Values are positive, negating for storno');
+  console.log('✅ Processed items before negation:', processed.processedItems);
   
-  // Use the same processing as normal invoice
-  const processed = processOrderDataForInvoice(invoiceData);
-  
-  // Convert all amounts to NEGATIVE
+  // Now convert ALL amounts to NEGATIVE for storno
   processed.processedItems = processed.processedItems.map(item => ({
     ...item,
     grossPrice: -Math.abs(item.grossPrice) // Force negative
@@ -327,6 +329,7 @@ function processOrderDataForStornoInvoice(invoiceData) {
   processed.totalGrossAmount = -Math.abs(processed.totalGrossAmount);
   
   console.log('✅ STORNO processing complete - all amounts negative');
+  console.log('📦 Final processed items:', processed.processedItems);
   
   return processed;
 }
