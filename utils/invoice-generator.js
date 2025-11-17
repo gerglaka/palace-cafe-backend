@@ -296,6 +296,18 @@ function processOrderDataForInvoice(invoiceData) {
 function processOrderDataForStornoInvoice(invoiceData) {
   console.log('🔄 Starting STORNO invoice data processing...');
   
+  // Check if values are already negative (from server.js)
+  const alreadyNegative = invoiceData.packagingFee < 0 || invoiceData.subtotal < 0 || invoiceData.totalGross < 0;
+  
+  if (alreadyNegative) {
+    console.log('ℹ️ Values already negative, using as-is');
+    // Just process normally, values are already negative
+    return processOrderDataForInvoice(invoiceData);
+  }
+  
+  // Values are positive, need to negate them
+  console.log('ℹ️ Values are positive, negating for storno');
+  
   // Use the same processing as normal invoice
   const processed = processOrderDataForInvoice(invoiceData);
   
