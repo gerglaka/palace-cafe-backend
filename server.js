@@ -351,7 +351,7 @@ app.get('/api/allergens', asyncHandler(async (req, res) => {
 // ============================================
 
 const { generateInvoicePDF, generateStornoInvoicePDF, generateInvoiceNumber, generateStornoInvoiceNumber, getNextInvoiceCounter, calculateVATBreakdown } = require('./utils/invoice-generator');
-const { sendInvoiceEmail, sendOrderStatusEmail, sendStornoInvoiceEmail, testEmailConfig } = require('./utils/email-service');
+const { sendInvoiceEmail, sendOrderStatusEmail, sendStornoInvoiceEmail, testEmailConfig } = require('./utils/email-service-brevo');
 
 // Place new order
 app.post('/api/orders', orderLimiter, asyncHandler(async (req, res) => {
