@@ -1,101 +1,256 @@
 /**
- * Palace Cafe & Street Food - Email Service
- * Professional email service with Websuport SMTP integration
- * Invoice delivery and order notifications
- * Bilingual Slovak/Hungarian support
+ * Palace Cafe & Bar - SMTP Email Service
+ * Email delivery via WebSupport SMTP server
+ * Handles invoice delivery, order notifications, and confirmations
  */
 
 const nodemailer = require('nodemailer');
 const { formatCurrency } = require('./invoice-generator');
 
-// Email configuration for Websuport SMTP
-const EMAIL_CONFIG = {
-  smtp: {
-    host: 'smtp.m1.websupport.sk',
-    port: 465,
-    secure: true, // true for 465, false for other ports
-    auth: {
-      user: process.env.EMAIL_USER || 'notifications@palacebar.sk',
-      pass: process.env.EMAIL_PASS
-    }
-  },
-  from: {
-    email: process.env.FROM_EMAIL || 'notifications@palacebar.sk',
-    name: 'Palace Cafe & Street Food'
-  },
-  replyTo: process.env.REPLY_TO_EMAIL || 'admin@palacebar.sk'
-};
-
-// Create SMTP transporter
-let transporter = null;
+// =============================================================================
+// SMTP CONFIGURATION
+// =============================================================================
 
 /**
- * Initialize email transporter
+ * Email service configuration using environment variables
+ * For production (Railway), these should be set in environment variables
+ * For development, you can use .env file
  */
-function initializeTransporter() {
+const SMTP_CONFIG = {
+  host: process.env.SMTP_HOST || 'smtp.m1.websupport.sk',
+  port: parseInt(process.env.SMTP_PORT || '465'),
+  secure: true, // Use SSL/TLS
+  auth: {
+    user: process.env.SMTP_USER || 'notifications@palacebar.sk',
+    pass: process.env.SMTP_PASS // Required! Set in environment variables
+  },
+  from: {
+    email: process.env.SMTP_FROM_EMAIL || 'notifications@palacebar.sk',
+    name: process.env.SMTP_FROM_NAME || 'Palace Cafe & Bar'
+  },
+  replyTo: process.env.SMTP_REPLY_TO || 'admin@palacebar.sk'
+};
+
+// Transporter instance (will be initialized on first use)
+let transporter = null;
+let isInitialized = false;
+
+// =============================================================================
+// INITIALIZATION
+// =============================================================================
+
+/**
+ * Initialize the SMTP transporter
+ * Creates a reusable transporter object for sending emails
+ * @returns {boolean} Success status
+ */
+function initializeSMTP() {
   try {
-    if (!process.env.EMAIL_PASS) {
-      console.log('⚠️ Email service not configured - EMAIL_PASS not set');
-      return null;
+    // Check if password is configured
+    if (!SMTP_CONFIG.auth.pass) {
+      console.log('⚠️ SMTP not configured - SMTP_PASS not set');
+      return false;
     }
 
+    // Create transporter with SMTP configuration
     transporter = nodemailer.createTransport({
-      host: EMAIL_CONFIG.smtp.host,
-      port: EMAIL_CONFIG.smtp.port,
-      secure: EMAIL_CONFIG.smtp.secure,
-      auth: EMAIL_CONFIG.smtp.auth,
-      // Additional options for better reliability
-      pool: true, // Use pooled connections
-      maxConnections: 5,
-      maxMessages: 100
+      host: SMTP_CONFIG.host,
+      port: SMTP_CONFIG.port,
+      secure: SMTP_CONFIG.secure,
+      auth: {
+        user: SMTP_CONFIG.auth.user,
+        pass: SMTP_CONFIG.auth.pass
+      },
+      tls: {
+        rejectUnauthorized: true // Verify SSL certificate
+      }
     });
 
-    console.log('✅ Email transporter initialized with Websuport SMTP');
-    return transporter;
+    isInitialized = true;
+    console.log('✅ SMTP email service initialized successfully');
+    console.log(`📧 Sending from: ${SMTP_CONFIG.from.email}`);
+    
+    return true;
     
   } catch (error) {
-    console.error('❌ Failed to initialize email transporter:', error);
-    return null;
+    console.error('❌ Failed to initialize SMTP:', error);
+    isInitialized = false;
+    return false;
+  }
+}
+
+/**
+ * Ensure transporter is initialized before sending
+ * @returns {boolean} True if ready, false otherwise
+ */
+function ensureInitialized() {
+  if (!isInitialized) {
+    return initializeSMTP();
+  }
+  return true;
+}
+
+// =============================================================================
+// EMAIL SENDING FUNCTIONS
+// =============================================================================
+
+/**
+ * Send order status notification email
+ * Used when order status changes to READY or OUT_FOR_DELIVERY
+ * 
+ * @param {Object} orderData - Order information
+ * @param {string} customerEmail - Customer's email address
+ * @returns {Promise<Object>} Result object with success status
+ */
+async function sendOrderStatusEmail(orderData, customerEmail) {
+  try {
+    console.log(`📧 Preparing status email for ${customerEmail}`);
+    
+    // Validate email address
+    if (!customerEmail || !customerEmail.includes('@')) {
+      console.log('⚠️ Invalid email address provided');
+      return { success: false, error: 'No valid email address provided' };
+    }
+
+    // Ensure SMTP is initialized
+    if (!ensureInitialized()) {
+      return { success: false, error: 'SMTP not configured' };
+    }
+
+    // Determine email content based on order status
+    let subject, headerText, mainMessage, subMessage;
+    
+    if (orderData.status === 'READY') {
+      subject = `Objednávka ${orderData.orderNumber} je pripravená - Palace Cafe`;
+      headerText = 'Objednávka pripravená na vyzdvihnutie / Rendelés készen áll az átvételre';
+      mainMessage = 'Vaša objednávka je pripravená na vyzdvihnutie!';
+      subMessage = 'Az Ön rendelése készen áll az átvételre!';
+    } else if (orderData.status === 'OUT_FOR_DELIVERY') {
+      subject = `Objednávka ${orderData.orderNumber} je na ceste - Palace Cafe`;
+      headerText = 'Objednávka je na ceste / Rendelés úton van';
+      mainMessage = 'Vaša objednávka je na ceste k vám!';
+      subMessage = 'Az Ön rendelése úton van!';
+    } else {
+      // Unsupported status
+      return { success: false, error: 'Unsupported order status for notification' };
+    }
+    
+    // Prepare email message
+    const mailOptions = {
+      from: `"${SMTP_CONFIG.from.name}" <${SMTP_CONFIG.from.email}>`,
+      to: customerEmail,
+      replyTo: SMTP_CONFIG.replyTo,
+      subject: subject,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: linear-gradient(135deg, #38141A, #1D665D); color: white; text-align: center; padding: 30px; border-radius: 10px;">
+            <h1>Palace Cafe & Bar</h1>
+            <p>${headerText}</p>
+          </div>
+          
+          <div style="padding: 30px; background: #f9f9f9; border-radius: 10px; margin-top: 20px;">
+            <h2>Dobrý deň ${orderData.customerName},</h2>
+            <p><strong>Jó napot ${orderData.customerName},</strong></p>
+            
+            <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; text-align: center;">
+              <p style="font-size: 18px; color: #38141A; font-weight: bold;">${mainMessage}</p>
+              <p style="font-size: 16px; color: #1D665D; font-style: italic;">${subMessage}</p>
+              
+              ${orderData.status === 'READY' ? `
+              <div style="margin-top: 20px; padding: 15px; background: #f0f8f0; border-radius: 8px;">
+                <p><strong>Adresa / Cím:</strong><br>Námestie gen. Klapku 9, 945 01 Komárno</p>
+              </div>
+              ` : `
+              <div style="margin-top: 20px; padding: 15px; background: #f0f8f0; border-radius: 8px;">
+                <p>Náš kuriér vás bude kontaktovať pred doručením.<br>
+                <em>Futárunk a kézbesítés előtt felveszi Önnel a kapcsolatot.</em></p>
+              </div>
+              `}
+            </div>
+            
+            <div style="text-align: center; padding: 20px; color: #666; font-size: 14px;">
+              <p>Ďakujeme za dôveru! / Köszönjük a bizalmát!</p>
+            </div>
+          </div>
+        </div>
+      `,
+      text: `
+Palace Cafe & Bar
+
+Dobrý deň ${orderData.customerName},
+
+${mainMessage}
+${subMessage}
+
+${orderData.status === 'READY' ? 
+`Adresa: Námestie gen. Klapku 9, 945 01 Komárno` :
+`Náš kuriér vás bude kontaktovať pred doručením.`}
+
+Ďakujeme za dôveru!
+`
+    };
+
+    // Send the email
+    console.log(`📤 Sending status email to ${customerEmail}...`);
+    const result = await transporter.sendMail(mailOptions);
+    
+    console.log(`✅ Status email sent successfully to ${customerEmail}`);
+    console.log(`📧 Message ID: ${result.messageId}`);
+    
+    return { 
+      success: true, 
+      messageId: result.messageId,
+      response: result.response
+    };
+    
+  } catch (error) {
+    console.error('❌ Failed to send status email:', error);
+    return { 
+      success: false, 
+      error: error.message,
+      code: error.code
+    };
   }
 }
 
 /**
  * Send invoice email with PDF attachment
- * @param {Object} invoiceData - Invoice data from database
- * @param {Buffer} pdfBuffer - Generated PDF buffer
+ * Sends a professional invoice email with attached PDF
+ * 
+ * @param {Object} invoiceData - Invoice details from database
+ * @param {Buffer} pdfBuffer - PDF file as buffer
  * @param {string} customerEmail - Customer's email address
- * @returns {Promise<Object>} Email sending response
+ * @returns {Promise<Object>} Result object with success status
  */
 async function sendInvoiceEmail(invoiceData, pdfBuffer, customerEmail) {
-  console.log(`Email sending disabled - would send invoice ${invoiceData.invoiceNumber} to ${customerEmail}`);
-  return { success: true, messageId: 'disabled-' + Date.now() };
-  
-/**   try {
+  try {
     console.log(`📧 Preparing invoice email for ${customerEmail}`);
     
+    // Validate inputs
     if (!customerEmail || !customerEmail.includes('@')) {
       console.log('⚠️ Invalid email address, skipping invoice email');
       return { success: false, error: 'Invalid email address' };
     }
 
-    // Initialize transporter if not already done
-    if (!transporter) {
-      transporter = initializeTransporter();
+    if (!pdfBuffer || !Buffer.isBuffer(pdfBuffer)) {
+      console.log('⚠️ Invalid PDF buffer provided');
+      return { success: false, error: 'Invalid PDF buffer' };
     }
 
-    if (!transporter) {
-      console.log('⚠️ Email service not configured, skipping email send');
-      return { success: false, error: 'Email service not configured' };
+    // Ensure SMTP is initialized
+    if (!ensureInitialized()) {
+      console.log('⚠️ SMTP not configured, skipping email send');
+      return { success: false, error: 'SMTP not configured' };
     }
 
     // Generate email content
     const emailContent = generateInvoiceEmailContent(invoiceData);
     
-    // Prepare email message
+    // Prepare email with PDF attachment
     const mailOptions = {
-      from: `${EMAIL_CONFIG.from.name} <${EMAIL_CONFIG.from.email}>`,
+      from: `"${SMTP_CONFIG.from.name}" <${SMTP_CONFIG.from.email}>`,
       to: customerEmail,
-      replyTo: EMAIL_CONFIG.replyTo,
+      replyTo: SMTP_CONFIG.replyTo,
       subject: emailContent.subject,
       html: emailContent.html,
       text: emailContent.text,
@@ -105,16 +260,10 @@ async function sendInvoiceEmail(invoiceData, pdfBuffer, customerEmail) {
           content: pdfBuffer,
           contentType: 'application/pdf'
         }
-      ],
-      // Custom headers for tracking
-      headers: {
-        'X-Invoice-ID': invoiceData.id.toString(),
-        'X-Order-ID': invoiceData.orderId.toString(),
-        'X-Invoice-Number': invoiceData.invoiceNumber
-      }
+      ]
     };
 
-    // Send email
+    // Send email via SMTP
     console.log(`📤 Sending invoice email to ${customerEmail}...`);
     const result = await transporter.sendMail(mailOptions);
     
@@ -129,43 +278,383 @@ async function sendInvoiceEmail(invoiceData, pdfBuffer, customerEmail) {
     
   } catch (error) {
     console.error('❌ Failed to send invoice email:', error);
-    
-    // Log detailed error for debugging
-    if (error.code) {
-      console.error('SMTP Error details:', {
-        code: error.code,
-        command: error.command,
-        response: error.response
-      });
-    }
-    
     return { 
       success: false, 
       error: error.message,
-      code: error.code || null
+      code: error.code
     };
-  } */
-} 
+  }
+}
 
 /**
- * Generate email content for invoice
- * @param {Object} invoiceData - Invoice data
- * @returns {Object} Email content with subject, html, and text
+ * Send order confirmation email
+ * Sent immediately after order is placed successfully
+ * 
+ * @param {Object} orderData - Order information
+ * @param {string} customerEmail - Customer's email address
+ * @returns {Promise<Object>} Result object with success status
+ */
+async function sendOrderConfirmationEmail(orderData, customerEmail) {
+  try {
+    console.log(`📧 Preparing order confirmation for ${customerEmail}`);
+    
+    // Validate email
+    if (!customerEmail || !customerEmail.includes('@')) {
+      return { success: false, error: 'No valid email address provided' };
+    }
+
+    // Ensure SMTP is initialized
+    if (!ensureInitialized()) {
+      return { success: false, error: 'SMTP not configured' };
+    }
+
+    // Determine order type text
+    const orderTypeText = orderData.orderType === 'DELIVERY' 
+      ? 'Donáška / Házhozszállítás' 
+      : 'Vyzdvihnutie / Átvétel';
+
+    // Determine payment method text
+    const paymentMethodText = getPaymentMethodText(orderData.paymentMethod);
+
+    // Generate items list HTML
+    const itemsListHtml = orderData.items && orderData.items.length > 0
+      ? orderData.items.map(item => `
+          <div style="padding: 10px 0; border-bottom: 1px solid #eee;">
+            <strong>${item.name || 'Neznámy produkt'}</strong><br>
+            <span style="color: #666;">Množstvo / Mennyiség: ${item.quantity}x</span>
+            <span style="float: right; color: #1D665D; font-weight: bold;">${formatCurrency(item.price * item.quantity)}</span>
+            ${item.customizations ? `<br><small style="color: #999;">• ${item.customizations}</small>` : ''}
+          </div>
+        `).join('')
+      : '<p>Žiadne položky / Nincs tétel</p>';
+
+    // Prepare email
+    const mailOptions = {
+      from: `"${SMTP_CONFIG.from.name}" <${SMTP_CONFIG.from.email}>`,
+      to: customerEmail,
+      replyTo: SMTP_CONFIG.replyTo,
+      subject: `Potvrdenie objednávky ${orderData.orderNumber} - Palace Cafe`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                .header { background: linear-gradient(135deg, #38141A, #1D665D); color: white; text-align: center; padding: 30px; border-radius: 10px; }
+                .content { padding: 30px; background: #f9f9f9; border-radius: 10px; margin-top: 20px; }
+                .order-box { background: white; padding: 20px; border-radius: 8px; margin: 20px 0; }
+                .info-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
+                .total-row { font-size: 18px; font-weight: bold; color: #38141A; padding: 15px 0; border-top: 2px solid #1D665D; }
+                .footer { text-align: center; padding: 20px; color: #666; font-size: 14px; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>🍽️ Palace Cafe & Bar</h1>
+                <p>Ďakujeme za vašu objednávku! / Köszönjük a rendelését!</p>
+            </div>
+            
+            <div class="content">
+                <h2>Dobrý deň ${orderData.customerName},</h2>
+                <p><strong>Jó napot ${orderData.customerName},</strong></p>
+                
+                <p>
+                    Vaša objednávka bola úspešne prijatá a je v spracovaní. Potvrdenie a faktúru nájdete v samostatnom emaili.
+                </p>
+                <p>
+                    <em>Rendelését sikeresen fogadtuk és feldolgozás alatt áll. A visszaigazolást és a számlát külön emailben kapja meg.</em>
+                </p>
+                
+                <div class="order-box">
+                    <h3>📋 Detaily objednávky / Rendelés részletei</h3>
+                    <div class="info-row">
+                        <span>Číslo objednávky / Rendelésszám:</span>
+                        <strong>#${orderData.orderNumber}</strong>
+                    </div>
+                    <div class="info-row">
+                        <span>Typ / Típus:</span>
+                        <strong>${orderTypeText}</strong>
+                    </div>
+                    <div class="info-row">
+                        <span>Platba / Fizetés:</span>
+                        <strong>${paymentMethodText}</strong>
+                    </div>
+                    
+                    <h4 style="margin-top: 20px; color: #1D665D;">📦 Vaše položky / Az Ön tételei</h4>
+                    ${itemsListHtml}
+                    
+                    <div class="total-row">
+                        <span>Celková suma / Végösszeg:</span>
+                        <span>${formatCurrency(orderData.totalAmount)}</span>
+                    </div>
+                </div>
+                
+                ${orderData.orderType === 'DELIVERY' ? `
+                <div class="order-box">
+                    <h3>🚚 Doručenie / Szállítás</h3>
+                    <p><strong>Adresa / Cím:</strong><br>${orderData.deliveryAddress || 'N/A'}</p>
+                    <p>
+                        Doručíme čo najskôr. Budeme vás kontaktovať pred doručením.<br>
+                        <em>A lehető leghamarabb kiszállítjuk. Kézbesítés előtt felvesszük Önnel a kapcsolatot.</em>
+                    </p>
+                </div>
+                ` : `
+                <div class="order-box">
+                    <h3>🏪 Vyzdvihnutie / Átvétel</h3>
+                    <p>
+                        <strong>Adresa / Cím:</strong><br>
+                        Námestie gen. Klapku 9, 945 01 Komárno
+                    </p>
+                    <p>
+                        Pripravíme vašu objednávku čo najskôr. Dáme vám vedieť, keď bude pripravená.<br>
+                        <em>A lehető leghamarabb elkészítjük rendelését. Értesítjük, amikor átvehető.</em>
+                    </p>
+                </div>
+                `}
+            </div>
+            
+            <div class="footer">
+                <p>
+                    <strong>Palace Cafe & Bar</strong><br>
+                    Námestie gen. Klapku 9, 945 01 Komárno<br>
+                    📞 Telefón / Telefon: +421 XXX XXX XXX
+                </p>
+                <p style="margin-top: 20px;">
+                    🙏 Tešíme sa na vás! / Várjuk Önt!
+                </p>
+                <p style="font-size: 12px; color: #999; margin-top: 20px;">
+                    Otázky? Kontaktujte nás: ${SMTP_CONFIG.replyTo}<br>
+                    <em>Kérdése van? Írjon nekünk: ${SMTP_CONFIG.replyTo}</em>
+                </p>
+            </div>
+        </body>
+        </html>
+      `,
+      text: `
+Palace Cafe & Bar - Potvrdenie objednávky ${orderData.orderNumber}
+
+Dobrý deň ${orderData.customerName},
+
+Vaša objednávka bola úspešne prijatá!
+
+DETAILY:
+- Číslo objednávky: #${orderData.orderNumber}
+- Typ: ${orderTypeText}
+- Platba: ${paymentMethodText}
+- Celková suma: ${formatCurrency(orderData.totalAmount)}
+
+${orderData.orderType === 'DELIVERY' ? 
+`Doručíme na: ${orderData.deliveryAddress}` :
+`Vyzdvihnutie na: Námestie gen. Klapku 9, 945 01 Komárno`}
+
+Ďakujeme za dôveru!
+Palace Cafe & Bar
+
+Kontakt: ${SMTP_CONFIG.replyTo}
+`
+    };
+
+    // Send the email
+    console.log(`📤 Sending confirmation email to ${customerEmail}...`);
+    const result = await transporter.sendMail(mailOptions);
+    
+    console.log(`✅ Confirmation email sent to ${customerEmail}`);
+    console.log(`📧 Message ID: ${result.messageId}`);
+    
+    return { 
+      success: true, 
+      messageId: result.messageId,
+      response: result.response
+    };
+    
+  } catch (error) {
+    console.error('❌ Failed to send confirmation email:', error);
+    return { 
+      success: false, 
+      error: error.message,
+      code: error.code
+    };
+  }
+}
+
+/**
+ * Send Storno (cancellation) invoice email
+ * Used when an order is cancelled and needs a credit note
+ * 
+ * @param {Object} stornoData - Storno invoice data
+ * @param {Buffer} pdfBuffer - Storno invoice PDF
+ * @param {string} customerEmail - Customer's email address
+ * @returns {Promise<Object>} Result object with success status
+ */
+async function sendStornoInvoiceEmail(stornoData, pdfBuffer, customerEmail) {
+  try {
+    console.log(`📧 Preparing storno invoice email for ${customerEmail}`);
+    
+    // Validate inputs
+    if (!customerEmail || !customerEmail.includes('@')) {
+      console.log('⚠️ Invalid email address');
+      return { success: false, error: 'Invalid email address' };
+    }
+
+    if (!pdfBuffer || !Buffer.isBuffer(pdfBuffer)) {
+      console.log('⚠️ Invalid PDF buffer');
+      return { success: false, error: 'Invalid PDF buffer' };
+    }
+
+    // Ensure SMTP is initialized
+    if (!ensureInitialized()) {
+      return { success: false, error: 'SMTP not configured' };
+    }
+
+    // Prepare storno email
+    const mailOptions = {
+      from: `"${SMTP_CONFIG.from.name}" <${SMTP_CONFIG.from.email}>`,
+      to: customerEmail,
+      replyTo: SMTP_CONFIG.replyTo,
+      subject: `Storno faktúra ${stornoData.stornoNumber} - Palace Cafe`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                .header { background: linear-gradient(135deg, #8B0000, #DC143C); color: white; text-align: center; padding: 30px; border-radius: 10px; }
+                .content { padding: 30px; background: #f9f9f9; border-radius: 10px; margin-top: 20px; }
+                .warning-box { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; border-radius: 5px; }
+                .info-box { background: white; padding: 20px; border-radius: 8px; margin: 20px 0; }
+                .footer { text-align: center; padding: 20px; color: #666; font-size: 14px; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>⚠️ Storno Faktúra / Sztornó Számla</h1>
+                <p>Palace Cafe & Bar</p>
+            </div>
+            
+            <div class="content">
+                <h2>Dobrý deň ${stornoData.customerName},</h2>
+                <p><strong>Jó napot ${stornoData.customerName},</strong></p>
+                
+                <div class="warning-box">
+                    <p>
+                        <strong>Vaša objednávka bola zrušená. / Az Ön rendelését törölték.</strong>
+                    </p>
+                </div>
+                
+                <p>
+                    V prílohe nájdete storno faktúru, ktorá ruší pôvodnú faktúru č. ${stornoData.originalInvoiceNumber}.
+                </p>
+                <p>
+                    <em>A mellékletben megtalálja a sztornó számlát, amely érvényteleníti az eredeti ${stornoData.originalInvoiceNumber} számú számlát.</em>
+                </p>
+                
+                <div class="info-box">
+                    <h3>📋 Detaily storna / Sztornó részletei</h3>
+                    <p>
+                        <strong>Storno číslo / Sztornó szám:</strong> ${stornoData.stornoNumber}<br>
+                        <strong>Pôvodná faktúra / Eredeti számla:</strong> ${stornoData.originalInvoiceNumber}<br>
+                        <strong>Suma / Összeg:</strong> ${formatCurrency(stornoData.amount)}
+                    </p>
+                </div>
+                
+                <p>
+                    Ospravedlňujeme sa za prípadné nepríjemnosti.<br>
+                    <em>Elnézést kérünk a kellemetlenségért.</em>
+                </p>
+            </div>
+            
+            <div class="footer">
+                <p>
+                    <strong>Palace Cafe & Bar</strong><br>
+                    Námestie gen. Klapku 9, 945 01 Komárno
+                </p>
+                <p style="font-size: 12px; color: #999; margin-top: 20px;">
+                    Otázky? / Kérdések? ${SMTP_CONFIG.replyTo}
+                </p>
+            </div>
+        </body>
+        </html>
+      `,
+      text: `
+Palace Cafe & Bar - Storno Faktúra ${stornoData.stornoNumber}
+
+Dobrý deň ${stornoData.customerName},
+
+Vaša objednávka bola zrušená.
+
+DETAILY STORNA:
+- Storno číslo: ${stornoData.stornoNumber}
+- Pôvodná faktúra: ${stornoData.originalInvoiceNumber}
+- Suma: ${formatCurrency(stornoData.amount)}
+
+V prílohe nájdete PDF storno faktúru.
+
+Ospravedlňujeme sa za prípadné nepríjemnosti.
+
+Palace Cafe & Bar
+Kontakt: ${SMTP_CONFIG.replyTo}
+`,
+      attachments: [
+        {
+          filename: `storno-${stornoData.stornoNumber}.pdf`,
+          content: pdfBuffer,
+          contentType: 'application/pdf'
+        }
+      ]
+    };
+
+    // Send email
+    console.log(`📤 Sending storno invoice to ${customerEmail}...`);
+    const result = await transporter.sendMail(mailOptions);
+    
+    console.log(`✅ Storno invoice sent to ${customerEmail}`);
+    console.log(`📧 Message ID: ${result.messageId}`);
+    
+    return { 
+      success: true, 
+      messageId: result.messageId,
+      response: result.response
+    };
+    
+  } catch (error) {
+    console.error('❌ Failed to send storno email:', error);
+    return { 
+      success: false, 
+      error: error.message,
+      code: error.code
+    };
+  }
+}
+
+// =============================================================================
+// HELPER FUNCTIONS
+// =============================================================================
+
+/**
+ * Generate invoice email content (HTML and text)
+ * Creates the email body for invoice emails
+ * 
+ * @param {Object} invoiceData - Invoice data from database
+ * @returns {Object} Object with subject, html, and text properties
  */
 function generateInvoiceEmailContent(invoiceData) {
+  // Determine order type and payment method
   const orderType = invoiceData.order?.orderType || 'PICKUP';
-  const orderTypeText = orderType === 'DELIVERY' ? 'doručenie / szállítás' : 'vyzdvihnutie / átvétel';
+  const orderTypeText = orderType === 'DELIVERY' 
+    ? 'Donáška / Házhozszállítás' 
+    : 'Vyzdvihnutie / Átvétel';
+  
   const paymentMethodText = getPaymentMethodText(invoiceData.paymentMethod);
-  
-  const subject = `Faktúra ${invoiceData.invoiceNumber} - Palace Cafe & Street Food`;
-  
+
+  const subject = `Faktúra ${invoiceData.invoiceNumber} - Palace Cafe & Bar`;
+
   const html = `
 <!DOCTYPE html>
-<html lang="sk">
+<html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${subject}</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -179,23 +668,18 @@ function generateInvoiceEmailContent(invoiceData) {
             background: linear-gradient(135deg, #38141A, #1D665D);
             color: white;
             text-align: center;
-            padding: 30px 20px;
+            padding: 30px;
             border-radius: 10px;
-            margin-bottom: 30px;
         }
         .header h1 {
             margin: 0;
-            font-size: 24px;
-        }
-        .header p {
-            margin: 10px 0 0 0;
-            opacity: 0.9;
+            font-size: 28px;
         }
         .content {
+            padding: 30px;
             background: #f9f9f9;
-            padding: 25px;
             border-radius: 10px;
-            margin-bottom: 20px;
+            margin-top: 20px;
         }
         .invoice-info {
             background: white;
@@ -239,15 +723,6 @@ function generateInvoiceEmailContent(invoiceData) {
             color: #666;
             font-size: 14px;
         }
-        .button {
-            display: inline-block;
-            background: #1D665D;
-            color: white;
-            padding: 12px 24px;
-            text-decoration: none;
-            border-radius: 5px;
-            margin: 20px 0;
-        }
         @media only screen and (max-width: 600px) {
             body { padding: 10px; }
             .detail-row { flex-direction: column; }
@@ -256,8 +731,8 @@ function generateInvoiceEmailContent(invoiceData) {
 </head>
 <body>
     <div class="header">
-        <h1>🍽️ Palace Cafe & Street Food</h1>
-        <p>Ďakujeme za vašu objednávku! / Köszönjük a rendelést!</p>
+        <h1>🍽️ Palace Cafe & Bar</h1>
+        <p>Ďakujeme za vašu objednávku! / Köszönjük a rendelését!</p>
     </div>
     
     <div class="content">
@@ -265,10 +740,10 @@ function generateInvoiceEmailContent(invoiceData) {
         <p><strong>Jó napot ${invoiceData.customerName},</strong></p>
         
         <p>
-            Ďakujeme za vašu objednávku v Palace Cafe & Street Food! V prílohe nájdete faktúru za vašu objednávku.
+            Ďakujeme za vašu objednávku v Palace Cafe & Bar! V prílohe nájdete faktúru za vašu objednávku.
         </p>
         <p>
-            <em>Köszönjük a Palace Cafe & Street Food-ban leadott rendelését! A mellékletben megtalálja a rendeléséhez tartozó számlát.</em>
+            <em>Köszönjük a Palace Cafe & Bar-ban leadott rendelését! A mellékletben megtalálja a rendeléséhez tartozó számlát.</em>
         </p>
         
         <div class="invoice-info">
@@ -278,7 +753,7 @@ function generateInvoiceEmailContent(invoiceData) {
                 <strong>${invoiceData.invoiceNumber}</strong>
             </div>
             <div class="detail-row">
-                <span>Číslo objednávky / Rendelés száma:</span>
+                <span>Číslo objednávky / Rendelésszám:</span>
                 <strong>#${invoiceData.order?.orderNumber || 'N/A'}</strong>
             </div>
             <div class="detail-row">
@@ -305,8 +780,8 @@ function generateInvoiceEmailContent(invoiceData) {
     
     <div class="footer">
         <p>
-            <strong>Palace Cafe & Street Food s.r.o.</strong><br>
-            Hradná 168/2, 945 01 Komárno<br>
+            <strong>Palace Cafe & Bar</strong><br>
+            Námestie gen. Klapku 9, 945 01 Komárno<br>
             IČO: 56384840 | DIČ: 2122291578 | IČ DPH: SK2122291578
         </p>
         
@@ -316,21 +791,20 @@ function generateInvoiceEmailContent(invoiceData) {
         </p>
         
         <p style="font-size: 12px; color: #999; margin-top: 20px;">
-            Pre otázky nás kontaktujte na: ${EMAIL_CONFIG.replyTo}<br>
-            <em>Kérdések esetén írjon nekünk: ${EMAIL_CONFIG.replyTo}</em>
+            Pre otázky nás kontaktujte na: ${SMTP_CONFIG.replyTo}<br>
+            <em>Kérdések esetén írjon nekünk: ${SMTP_CONFIG.replyTo}</em>
         </p>
     </div>
 </body>
 </html>
   `;
   
-  // Plain text version for email clients that don't support HTML
   const text = `
-Palace Cafe & Street Food - Faktúra ${invoiceData.invoiceNumber}
+Palace Cafe & Bar - Faktúra ${invoiceData.invoiceNumber}
 
 Dobrý deň ${invoiceData.customerName},
 
-Ďakujeme za vašu objednávku v Palace Cafe & Street Food!
+Ďakujeme za vašu objednávku v Palace Cafe & Bar!
 
 DETAILY OBJEDNÁVKY:
 - Číslo faktúry: ${invoiceData.invoiceNumber}
@@ -342,17 +816,20 @@ DETAILY OBJEDNÁVKY:
 V prílohe nájdete PDF faktúru.
 
 Ďakujeme za dôveru!
-Palace Cafe & Street Food s.r.o.
-Hradná 168/2, 945 01 Komárno
+Palace Cafe & Bar
+Námestie gen. Klapku 9, 945 01 Komárno
 
-Kontakt: ${EMAIL_CONFIG.replyTo}
+Kontakt: ${SMTP_CONFIG.replyTo}
 `;
 
   return { subject, html, text };
 }
 
 /**
- * Generate HTML list of order items
+ * Generate HTML list of order items for email
+ * 
+ * @param {Array} orderItems - Array of order items
+ * @returns {string} HTML string of items
  */
 function generateItemsList(orderItems) {
   if (!orderItems || !Array.isArray(orderItems)) {
@@ -368,7 +845,10 @@ function generateItemsList(orderItems) {
 }
 
 /**
- * Generate delivery information section
+ * Generate delivery information section for email
+ * 
+ * @param {Object} invoiceData - Invoice data
+ * @returns {string} HTML string for delivery info
  */
 function generateDeliveryInfo(invoiceData) {
   return `
@@ -385,14 +865,16 @@ function generateDeliveryInfo(invoiceData) {
 }
 
 /**
- * Generate pickup information section  
+ * Generate pickup information section for email
+ * 
+ * @returns {string} HTML string for pickup info
  */
 function generatePickupInfo() {
   return `
     <div class="invoice-info">
       <h3>🏪 Informácie o vyzdvihnutí / Átvételi információk</h3>
       <p>
-        <strong>Adresa / Cím:</strong> Hradná 168/2, 945 01 Komárno<br>
+        <strong>Adresa / Cím:</strong> Námestie gen. Klapku 9, 945 01 Komárno<br>
         Vaša objednávka bude pripravená na vyzdvihnutie. Platba prebehne pri prevzatí.
       </p>
       <p>
@@ -404,6 +886,9 @@ function generatePickupInfo() {
 
 /**
  * Get payment method text in both languages
+ * 
+ * @param {string} paymentMethod - Payment method code
+ * @returns {string} Formatted payment method text
  */
 function getPaymentMethodText(paymentMethod) {
   const methods = {
@@ -415,151 +900,76 @@ function getPaymentMethodText(paymentMethod) {
   return methods[paymentMethod] || paymentMethod;
 }
 
-/**
- * Send order confirmation email (without invoice)
- * @param {Object} orderData - Order data
- * @param {string} customerEmail - Customer email
- */
-async function sendOrderConfirmationEmail(orderData, customerEmail) {
-  console.log(`Email sending disabled - would send confirmation for ${orderData.orderNumber} to ${customerEmail}`);
-  return { success: true, messageId: 'disabled-' + Date.now() };
- 
-  /**
-  try {
-    console.log(`📧 Preparing order confirmation for ${customerEmail}`);
-    
-    if (!customerEmail) {
-      return { success: false, error: 'No email address provided' };
-    }
-
-    // Initialize transporter if not already done
-    if (!transporter) {
-      transporter = initializeTransporter();
-    }
-
-    if (!transporter) {
-      return { success: false, error: 'Email service not configured' };
-    }
-
-    const orderType = orderData.orderType === 'DELIVERY' ? 'doručenie / szállítás' : 'vyzdvihnutie / átvétel';
-    
-    const mailOptions = {
-      from: `${EMAIL_CONFIG.from.name} <${EMAIL_CONFIG.from.email}>`,
-      to: customerEmail,
-      replyTo: EMAIL_CONFIG.replyTo,
-      subject: `Potvrdenie objednávky #${orderData.orderNumber} - Palace Cafe`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <div style="background: linear-gradient(135deg, #38141A, #1D665D); color: white; text-align: center; padding: 30px; border-radius: 10px;">
-            <h1>🍽️ Palace Cafe & Street Food</h1>
-            <p>Objednávka prijatá! / Rendelés elfogadva!</p>
-          </div>
-          
-          <div style="padding: 30px; background: #f9f9f9; border-radius: 10px; margin-top: 20px;">
-            <h2>Dobrý deň ${orderData.customerName},</h2>
-            <p>Vaša objednávka #${orderData.orderNumber} bola úspešne prijatá!</p>
-            <p><em>Az Ön ${orderData.orderNumber} számú rendelését sikeresen felvettük!</em></p>
-            
-            <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0;">
-              <p><strong>Typ:</strong> ${orderType}</p>
-              <p><strong>Suma:</strong> ${formatCurrency(orderData.total)}</p>
-              <p><strong>Stav:</strong> Spracováva sa / Feldolgozás alatt</p>
-            </div>
-            
-            <p>Budeme vás informovať o ďalších krokoch emailom.</p>
-            <p><em>A további lépésekről email-ben tájékoztatjuk.</em></p>
-          </div>
-          
-          <div style="text-align: center; padding: 20px; color: #666;">
-            <p>Palace Cafe & Street Food s.r.o.<br>
-            Hradná 168/2, 945 01 Komárno</p>
-          </div>
-        </div>
-      `,
-      text: `
-Palace Cafe & Street Food - Potvrdenie objednávky #${orderData.orderNumber}
-
-Dobrý deň ${orderData.customerName},
-
-Vaša objednávka #${orderData.orderNumber} bola úspešne prijatá!
-
-Typ: ${orderType}
-Suma: ${formatCurrency(orderData.total)}
-Stav: Spracováva sa
-
-Budeme vás informovať o ďalších krokoch.
-
-Palace Cafe & Street Food s.r.o.
-Hradná 168/2, 945 01 Komárno
-`
-    };
-
-    const result = await transporter.sendMail(mailOptions);
-    console.log(`✅ Order confirmation sent to ${customerEmail}`);
-    
-    return { success: true, messageId: result.messageId };
-    
-  } catch (error) {
-    console.error('❌ Failed to send order confirmation:', error);
-    return { success: false, error: error.message };
-  }  */
-}
+// =============================================================================
+// TESTING & CONFIGURATION
+// =============================================================================
 
 /**
- * Test email configuration
+ * Test SMTP email configuration
+ * Verifies that SMTP is properly configured and can connect
+ * 
+ * @returns {Promise<Object>} Test result with configuration details
  */
 async function testEmailConfig() {
   try {
-    if (!process.env.EMAIL_PASS) {
+    // Check if password is set
+    if (!SMTP_CONFIG.auth.pass) {
       return { 
         success: false, 
-        error: 'EMAIL_PASS environment variable not set' 
-      };
-    }
-    
-    if (!process.env.EMAIL_USER) {
-      return { 
-        success: false, 
-        error: 'EMAIL_USER environment variable not set' 
+        error: 'SMTP_PASS environment variable not set' 
       };
     }
 
-    // Test connection
-    if (!transporter) {
-      transporter = initializeTransporter();
+    // Initialize if needed
+    if (!ensureInitialized()) {
+      return { success: false, error: 'Failed to initialize SMTP' };
     }
 
-    if (!transporter) {
-      return { success: false, error: 'Failed to initialize email transporter' };
-    }
-
-    // Verify SMTP connection
+    // Verify connection
+    console.log('🔍 Testing SMTP connection...');
     await transporter.verify();
     
-    console.log('✅ Email configuration is valid and SMTP connection successful');
+    console.log('✅ SMTP configuration is valid and connection successful');
+    
     return { 
       success: true, 
       config: {
-        host: EMAIL_CONFIG.smtp.host,
-        port: EMAIL_CONFIG.smtp.port,
-        user: EMAIL_CONFIG.smtp.auth.user,
-        fromEmail: EMAIL_CONFIG.from.email,
-        replyTo: EMAIL_CONFIG.replyTo
+        host: SMTP_CONFIG.host,
+        port: SMTP_CONFIG.port,
+        secure: SMTP_CONFIG.secure,
+        user: SMTP_CONFIG.auth.user,
+        fromEmail: SMTP_CONFIG.from.email,
+        fromName: SMTP_CONFIG.from.name,
+        replyTo: SMTP_CONFIG.replyTo
       }
     };
     
   } catch (error) {
-    console.error('❌ Email configuration test failed:', error);
-    return { success: false, error: error.message };
+    console.error('❌ SMTP configuration test failed:', error);
+    return { 
+      success: false, 
+      error: error.message,
+      code: error.code
+    };
   }
 }
 
-// Initialize transporter on module load
-initializeTransporter();
+// =============================================================================
+// INITIALIZATION ON MODULE LOAD
+// =============================================================================
+
+// Initialize SMTP when module is loaded
+initializeSMTP();
+
+// =============================================================================
+// EXPORTS
+// =============================================================================
 
 module.exports = {
   sendInvoiceEmail,
   sendOrderConfirmationEmail, 
+  sendOrderStatusEmail,
+  sendStornoInvoiceEmail,
   testEmailConfig,
-  EMAIL_CONFIG
+  EMAIL_CONFIG: SMTP_CONFIG // Export config for compatibility
 };
