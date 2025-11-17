@@ -5224,6 +5224,552 @@ app.get('/api/admin/invoices/vat-report', authenticateAdmin, requireRole(['SUPER
   }
 }));
 
+// ============================================
+// MONTHLY COMPREHENSIVE BUSINESS REPORT
+// ============================================
+/**
+ * Generate comprehensive monthly business report PDF
+ * Includes: revenue by payment method, invoice numbers, top/bottom items,
+ * pickup/delivery stats, and average order processing times
+ */
+app.get('/api/admin/invoices/monthly-report', authenticateAdmin, requireRole(['SUPER_ADMIN']), asyncHandler(async (req, res) => {
+  const { month, year = new Date().getFullYear() } = req.query;
+
+  console.log(`📊 Monthly comprehensive report requested - ${month}/${year}`);
+
+  try {
+    // Validate input parameters
+    if (!month || !year) {
+      return res.status(400).json({
+        success: false,
+        error: 'Month and year are required'
+      });
+    }
+
+    // Calculate date range for the selected month
+    const startDate = new Date(year, month - 1, 1); // First day of month
+    const endDate = new Date(year, month, 0, 23, 59, 59, 999); // Last day of month
+
+    console.log(`📅 Date range: ${startDate.toISOString()} - ${endDate.toISOString()}`);
+
+    // ============================================
+    // DATA COLLECTION - Parallel queries for performance
+    // ============================================
+
+    const [
+      // 1. Revenue by payment method (excluding STORNO invoices)
+      revenueByPayment,
+      
+      // 2. All invoices for the month
+      monthlyInvoices,
+      
+      // 3. Top ordered items
+      topItems,
+      
+      // 4. Order type statistics
+      orderTypeStats,
+      
+      // 5. Order timing data for averages
+      orderTimings
+    ] = await Promise.all([
+      // Query 1: Revenue grouped by payment method (exclude STORNO)
+      prisma.invoice.groupBy({
+        by: ['paymentMethod'],
+        where: {
+          createdAt: {
+            gte: startDate,
+            lte: endDate
+          },
+          invoiceType: 'NORMAL' // Exclude STORNO invoices from revenue
+        },
+        _sum: {
+          totalGross: true
+        },
+        _count: true
+      }),
+
+      // Query 2: Get all invoice numbers for the month
+      prisma.invoice.findMany({
+        where: {
+          createdAt: {
+            gte: startDate,
+            lte: endDate
+          }
+        },
+        select: {
+          invoiceNumber: true,
+          invoiceType: true,
+          totalGross: true,
+          createdAt: true
+        },
+        orderBy: {
+          invoiceNumber: 'asc'
+        }
+      }),
+
+      // Query 3: Get order items with quantities (for top/bottom items)
+      prisma.orderItem.groupBy({
+        by: ['menuItemId'],
+        where: {
+          order: {
+            createdAt: {
+              gte: startDate,
+              lte: endDate
+            },
+            status: {
+              in: ['DELIVERED', 'READY'] // Only completed orders
+            }
+          }
+        },
+        _sum: {
+          quantity: true
+        },
+        _count: true
+      }),
+
+      // Query 4: Order type statistics (PICKUP vs DELIVERY)
+      prisma.order.groupBy({
+        by: ['orderType'],
+        where: {
+          createdAt: {
+            gte: startDate,
+            lte: endDate
+          },
+          status: {
+            in: ['DELIVERED', 'READY']
+          }
+        },
+        _count: true,
+        _sum: {
+          total: true
+        }
+      }),
+
+      // Query 5: Get order timing data (for average calculations)
+      prisma.order.findMany({
+        where: {
+          createdAt: {
+            gte: startDate,
+            lte: endDate
+          },
+          status: {
+            in: ['DELIVERED', 'READY']
+          },
+          acceptedAt: {
+            not: null
+          }
+        },
+        select: {
+          createdAt: true,
+          acceptedAt: true,
+          readyAt: true,
+          deliveredAt: true,
+          status: true,
+          orderType: true
+        }
+      })
+    ]);
+
+    // ============================================
+    // DATA PROCESSING
+    // ============================================
+
+    // Process revenue data
+    const revenueData = {
+      card: 0,
+      cash: 0,
+      total: 0
+    };
+
+    revenueByPayment.forEach(item => {
+      const amount = item._sum.totalGross || 0;
+      if (item.paymentMethod === 'CARD') {
+        revenueData.card = amount;
+      } else if (item.paymentMethod === 'CASH') {
+        revenueData.cash = amount;
+      }
+      revenueData.total += amount;
+    });
+
+    // Separate NORMAL and STORNO invoices
+    const normalInvoices = monthlyInvoices.filter(inv => inv.invoiceType === 'NORMAL');
+    const stornoInvoices = monthlyInvoices.filter(inv => inv.invoiceType === 'STORNO');
+
+    // Get menu item details for top/bottom items
+    const menuItemIds = topItems.map(item => item.menuItemId);
+    const menuItems = await prisma.menuItem.findMany({
+      where: {
+        id: {
+          in: menuItemIds
+        }
+      },
+      include: {
+        translations: {
+          where: {
+            language: 'hu'
+          }
+        }
+      }
+    });
+
+    // Create a map of menuItemId -> name
+    const menuItemMap = new Map();
+    menuItems.forEach(item => {
+      menuItemMap.set(item.id, item.translations[0]?.name || 'Ismeretlen termék');
+    });
+
+    // Sort items by quantity and get top 3 and bottom 3
+    const sortedItems = topItems
+      .map(item => ({
+        name: menuItemMap.get(item.menuItemId) || 'Ismeretlen',
+        quantity: item._sum.quantity || 0
+      }))
+      .sort((a, b) => b.quantity - a.quantity);
+
+    const topThreeItems = sortedItems.slice(0, 3);
+    const bottomThreeItems = sortedItems.slice(-3).reverse(); // Reverse to show least popular first
+
+    // Process order type statistics
+    const orderTypeData = {
+      pickup: { count: 0, revenue: 0 },
+      delivery: { count: 0, revenue: 0 }
+    };
+
+    orderTypeStats.forEach(item => {
+      if (item.orderType === 'PICKUP') {
+        orderTypeData.pickup.count = item._count;
+        orderTypeData.pickup.revenue = item._sum.total || 0;
+      } else if (item.orderType === 'DELIVERY') {
+        orderTypeData.delivery.count = item._count;
+        orderTypeData.delivery.revenue = item._sum.total || 0;
+      }
+    });
+
+    // Calculate average times
+    const calculateAverageTime = (orders, startField, endField) => {
+      const validOrders = orders.filter(o => o[startField] && o[endField]);
+      if (validOrders.length === 0) return 0;
+
+      const totalMinutes = validOrders.reduce((sum, order) => {
+        const start = new Date(order[startField]);
+        const end = new Date(order[endField]);
+        const minutes = (end - start) / (1000 * 60); // Convert ms to minutes
+        return sum + minutes;
+      }, 0);
+
+      return Math.round(totalMinutes / validOrders.length);
+    };
+
+    const avgTimes = {
+      acceptance: calculateAverageTime(orderTimings, 'createdAt', 'acceptedAt'), // Order to acceptance
+      preparation: calculateAverageTime(orderTimings, 'acceptedAt', 'readyAt'), // Acceptance to ready
+      delivery: calculateAverageTime(
+        orderTimings.filter(o => o.orderType === 'DELIVERY' && o.deliveredAt),
+        'readyAt',
+        'deliveredAt'
+      ), // Ready to delivered (only for delivery orders)
+      total: calculateAverageTime(
+        orderTimings.filter(o => o.status === 'DELIVERED'),
+        'createdAt',
+        'deliveredAt'
+      ) // Order to completion
+    };
+
+    // ============================================
+    // PDF GENERATION
+    // ============================================
+
+    const PDFDocument = require('pdfkit');
+    const doc = new PDFDocument({ 
+      margin: 50,
+      size: 'A4'
+    });
+
+    // Set response headers for PDF download
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="havi-osszefoglalo-${year}-${month.toString().padStart(2, '0')}.pdf"`);
+
+    // Pipe the PDF to the response
+    doc.pipe(res);
+
+    // ============================================
+    // PDF CONTENT - Palace Cafe Branded
+    // ============================================
+
+    // Palace Cafe brand colors
+    const colors = {
+      gold: '#D4AF37',
+      dark: '#1a1a1a',
+      accent: '#8B4513',
+      gray: '#666666',
+      lightGray: '#f5f5f5'
+    };
+
+    // Helper function to format currency in EUR
+    const formatCurrency = (amount) => {
+      return new Intl.NumberFormat('hu-HU', {
+        style: 'currency',
+        currency: 'EUR'
+      }).format(amount);
+    };
+
+    // Helper function to format month name in Hungarian
+    const getHungarianMonth = (monthNum) => {
+      const months = [
+        'Január', 'Február', 'Március', 'Április', 'Május', 'Június',
+        'Július', 'Augusztus', 'Szeptember', 'Október', 'November', 'December'
+      ];
+      return months[monthNum - 1];
+    };
+
+    // ============================================
+    // HEADER SECTION
+    // ============================================
+    doc.fontSize(28)
+       .fillColor(colors.gold)
+       .text('Palace Cafe & Bar', 50, 50);
+
+    doc.fontSize(12)
+       .fillColor(colors.gray)
+       .text('Komárno, Slovakia', 50, 85)
+       .text('www.palacebar.sk', 50, 100);
+
+    // Report title
+    doc.fontSize(20)
+       .fillColor(colors.dark)
+       .text('Havi Összefoglaló Jelentés', 50, 140);
+
+    doc.fontSize(14)
+       .fillColor(colors.gray)
+       .text(`${getHungarianMonth(parseInt(month))} ${year}`, 50, 165);
+
+    // Horizontal line
+    doc.moveTo(50, 190)
+       .lineTo(545, 190)
+       .strokeColor(colors.gold)
+       .lineWidth(2)
+       .stroke();
+
+    let yPosition = 210;
+
+    // ============================================
+    // REVENUE SECTION
+    // ============================================
+    doc.fontSize(16)
+       .fillColor(colors.accent)
+       .text('💰 Bevételi Összesítő', 50, yPosition);
+
+    yPosition += 30;
+
+    // Revenue box with background
+    doc.rect(50, yPosition, 495, 100)
+       .fillAndStroke(colors.lightGray, colors.gray);
+
+    yPosition += 20;
+
+    doc.fontSize(12)
+       .fillColor(colors.dark)
+       .text('Kártyás fizetés:', 70, yPosition)
+       .text(formatCurrency(revenueData.card), 400, yPosition, { align: 'right', width: 125 });
+
+    yPosition += 25;
+
+    doc.text('Készpénzes fizetés:', 70, yPosition)
+       .text(formatCurrency(revenueData.cash), 400, yPosition, { align: 'right', width: 125 });
+
+    yPosition += 30;
+
+    doc.fontSize(14)
+       .fillColor(colors.accent)
+       .text('Teljes bevétel:', 70, yPosition)
+       .text(formatCurrency(revenueData.total), 400, yPosition, { align: 'right', width: 125 });
+
+    yPosition += 50;
+
+    // ============================================
+    // INVOICE STATISTICS
+    // ============================================
+    doc.fontSize(16)
+       .fillColor(colors.accent)
+       .text('📄 Számlák', 50, yPosition);
+
+    yPosition += 30;
+
+    doc.fontSize(12)
+       .fillColor(colors.dark)
+       .text(`Normál számlák száma: ${normalInvoices.length}`, 70, yPosition);
+
+    yPosition += 20;
+
+    doc.text(`Stornó számlák száma: ${stornoInvoices.length}`, 70, yPosition);
+
+    yPosition += 20;
+
+    doc.text(`Összes számla: ${monthlyInvoices.length}`, 70, yPosition);
+
+    yPosition += 30;
+
+    // Invoice number range
+    if (normalInvoices.length > 0) {
+      const firstInvoice = normalInvoices[0].invoiceNumber;
+      const lastInvoice = normalInvoices[normalInvoices.length - 1].invoiceNumber;
+      
+      doc.fontSize(10)
+         .fillColor(colors.gray)
+         .text(`Számlaszám tartomány: ${firstInvoice} - ${lastInvoice}`, 70, yPosition);
+      
+      yPosition += 30;
+    }
+
+    // ============================================
+    // TOP & BOTTOM ITEMS
+    // ============================================
+    
+    // Check if we need a new page
+    if (yPosition > 600) {
+      doc.addPage();
+      yPosition = 50;
+    }
+
+    doc.fontSize(16)
+       .fillColor(colors.accent)
+       .text('🏆 Top 3 Termékek', 50, yPosition);
+
+    yPosition += 25;
+
+    topThreeItems.forEach((item, index) => {
+      doc.fontSize(12)
+         .fillColor(colors.dark)
+         .text(`${index + 1}. ${item.name}`, 70, yPosition)
+         .text(`${item.quantity} db`, 400, yPosition, { align: 'right', width: 125 });
+      
+      yPosition += 20;
+    });
+
+    yPosition += 20;
+
+    doc.fontSize(16)
+       .fillColor(colors.accent)
+       .text('📉 Legkevésbé Rendelt Termékek', 50, yPosition);
+
+    yPosition += 25;
+
+    bottomThreeItems.forEach((item, index) => {
+      doc.fontSize(12)
+         .fillColor(colors.dark)
+         .text(`${index + 1}. ${item.name}`, 70, yPosition)
+         .text(`${item.quantity} db`, 400, yPosition, { align: 'right', width: 125 });
+      
+      yPosition += 20;
+    });
+
+    yPosition += 30;
+
+    // ============================================
+    // ORDER TYPE STATISTICS
+    // ============================================
+    
+    // Check if we need a new page
+    if (yPosition > 600) {
+      doc.addPage();
+      yPosition = 50;
+    }
+
+    doc.fontSize(16)
+       .fillColor(colors.accent)
+       .text('🚚 Rendelés Típusok', 50, yPosition);
+
+    yPosition += 30;
+
+    const totalOrders = orderTypeData.pickup.count + orderTypeData.delivery.count;
+    const pickupPercent = totalOrders > 0 ? ((orderTypeData.pickup.count / totalOrders) * 100).toFixed(1) : 0;
+    const deliveryPercent = totalOrders > 0 ? ((orderTypeData.delivery.count / totalOrders) * 100).toFixed(1) : 0;
+
+    doc.fontSize(12)
+       .fillColor(colors.dark)
+       .text(`Elviteles rendelések: ${orderTypeData.pickup.count} (${pickupPercent}%)`, 70, yPosition)
+       .text(formatCurrency(orderTypeData.pickup.revenue), 400, yPosition, { align: 'right', width: 125 });
+
+    yPosition += 25;
+
+    doc.text(`Kiszállításos rendelések: ${orderTypeData.delivery.count} (${deliveryPercent}%)`, 70, yPosition)
+       .text(formatCurrency(orderTypeData.delivery.revenue), 400, yPosition, { align: 'right', width: 125 });
+
+    yPosition += 40;
+
+    // ============================================
+    // AVERAGE PROCESSING TIMES
+    // ============================================
+    doc.fontSize(16)
+       .fillColor(colors.accent)
+       .text('⏱️ Átlagos Feldolgozási Idők', 50, yPosition);
+
+    yPosition += 30;
+
+    doc.fontSize(12)
+       .fillColor(colors.dark)
+       .text('Rendelés elfogadása:', 70, yPosition)
+       .text(`${avgTimes.acceptance} perc`, 400, yPosition, { align: 'right', width: 125 });
+
+    yPosition += 25;
+
+    doc.text('Elkészítési idő:', 70, yPosition)
+       .text(`${avgTimes.preparation} perc`, 400, yPosition, { align: 'right', width: 125 });
+
+    yPosition += 25;
+
+    if (avgTimes.delivery > 0) {
+      doc.text('Kiszállítási idő:', 70, yPosition)
+         .text(`${avgTimes.delivery} perc`, 400, yPosition, { align: 'right', width: 125 });
+
+      yPosition += 25;
+    }
+
+    doc.fontSize(11)
+       .fillColor(colors.accent)
+       .text('Teljes átfutási idő:', 70, yPosition)
+       .text(`${avgTimes.total} perc`, 400, yPosition, { align: 'right', width: 125 });
+
+    yPosition += 40;
+
+    // ============================================
+    // FOOTER
+    // ============================================
+    const now = new Date();
+    const generatedDate = now.toLocaleDateString('hu-HU', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    // Move to bottom of page
+    doc.fontSize(9)
+       .fillColor(colors.gray)
+       .text(`Jelentés generálva: ${generatedDate}`, 50, 750, { align: 'center', width: 495 });
+
+    doc.text('Palace Cafe & Bar - Autentikus ízek 2016 óta', 50, 765, { align: 'center', width: 495 });
+
+    // Finalize the PDF
+    doc.end();
+
+    console.log(`✅ Monthly report PDF generated successfully for ${month}/${year}`);
+
+  } catch (error) {
+    console.error('❌ Failed to generate monthly report:', error);
+    
+    // Send error response if headers haven't been sent yet
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to generate monthly report',
+        details: error.message
+      });
+    }
+  }
+}));
+
 // Export custom date range
 app.get('/api/admin/invoices/export/custom', authenticateAdmin, requireRole(['SUPER_ADMIN']), asyncHandler(async (req, res) => {
   const { startDate, endDate } = req.query;
