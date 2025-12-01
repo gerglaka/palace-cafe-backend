@@ -2961,6 +2961,14 @@ app.get('/api/admin/stats/revenue-trends', authenticateAdmin, asyncHandler(async
         }
       };
       break;
+    case 'year':
+      const yearStart = new Date(now.getFullYear(), 0, 1); // January 1st of current year
+      dateFilter = {
+        createdAt: {
+          gte: yearStart
+        }
+      };
+      break;
   }
   
   try {
@@ -3087,6 +3095,14 @@ app.get('/api/admin/stats/top-items', authenticateAdmin, asyncHandler(async (req
           }
         };
         break;
+      case 'year':
+        const yearStart = new Date(now.getFullYear(), 0, 1);
+        dateFilter = {
+          createdAt: {
+            gte: yearStart
+          }
+        };
+        break;
     }
   }
   
@@ -3191,6 +3207,15 @@ app.get('/api/admin/stats/order-timing', authenticateAdmin, asyncHandler(async (
         }
       };
       break;
+    case 'year':
+      const yearStart = new Date(now.getFullYear(), 0, 1);
+      dateFilter = {
+        createdAt: {
+          gte: yearStart
+        }
+      };
+      break
+
   }
   
   try {
@@ -3310,6 +3335,14 @@ app.get('/api/admin/stats/payment-methods', authenticateAdmin, asyncHandler(asyn
         dateFilter = {
           createdAt: {
             gte: monthStart
+          }
+        };
+        break;
+      case 'year':
+        const yearStart = new Date(now.getFullYear(), 0, 1);
+        dateFilter = {
+          createdAt: {
+            gte: yearStart
           }
         };
         break;
