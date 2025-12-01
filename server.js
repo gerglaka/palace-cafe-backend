@@ -3258,13 +3258,13 @@ app.get('/api/admin/stats/order-timing', authenticateAdmin, asyncHandler(async (
       hourlyData[key].totalRevenue += order.total;
       
       // Calculate prep time if available
-      if (order.preparingAt && order.readyAt) {
-        const prepTime = (new Date(order.readyAt) - new Date(order.preparingAt)) / (1000 * 60); // minutes
-        avgPrepTimes.push({
-          hour,
-          prepTime,
-          date: order.createdAt
-        });
+      if (order.acceptedAt && order.readyAt) {
+          const prepTime = (new Date(order.readyAt) - new Date(order.acceptedAt)) / (1000 * 60); // minutes
+          avgPrepTimes.push({
+              hour,
+              prepTime,
+              date: order.createdAt
+          });
       }
     });
 
