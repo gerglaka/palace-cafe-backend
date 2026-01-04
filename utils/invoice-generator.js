@@ -96,10 +96,17 @@ function calculateVATBreakdown(grossAmount) {
 }
 
 /**
- * Generate invoice number
+ * Generate invoice number with automatic year-based prefix
+ * Cash invoices: 1[YY]0xxxx (e.g., 12600001 for 2026)
+ * Card invoices: 2[YY]0xxxx (e.g., 22600001 for 2026)
+ * @param {string} paymentMethod - 'CASH' or 'CARD'
+ * @param {number} year - Invoice year (e.g., 2026)
+ * @param {number} counter - Sequential invoice counter
+ * @returns {string} Formatted invoice number
  */
 function generateInvoiceNumber(paymentMethod, year, counter) {
-  const prefix = paymentMethod === 'CASH' ? '1250' : '2250';
+  const yearSuffix = year.toString().slice(-2);
+  const prefix = paymentMethod === 'CASH' ? `1${yearSuffix}0` : `2${yearSuffix}0`;
   const paddedCounter = counter.toString().padStart(4, '0');
   return `${prefix}${paddedCounter}`;
 }
